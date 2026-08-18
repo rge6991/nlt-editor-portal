@@ -163,7 +163,7 @@
 
   .error { color: #ff9d7a; font-size: 14px; margin-top: 10px; }
   .msg { color: var(--orange); font-size: 14px; margin-top: 10px; }
-  .hidden { display: none; }
+  .hidden { display: none !important; }
 
   .toprow { display: flex; justify-content: space-between; align-items: center; }
   .email-line { font-size: 13px; color: var(--grey); margin: 4px 0 20px; }
@@ -219,6 +219,36 @@
   .meta { font-size: 12px; color: var(--grey); margin-top: 8px; }
   a.videolink { color: var(--orange); font-weight: 700; text-decoration: none; }
   a.videolink:hover { text-decoration: underline; }
+
+  .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .filter-btn {
+    background: rgba(255,255,255,0.06);
+    color: var(--grey);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-family: 'Avenir NLT', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: 0;
+    width: auto;
+    margin-top: 0;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .filter-btn:hover { opacity: 1; border-color: rgba(255,255,255,0.4); }
+  .filter-btn.active { background: var(--orange); color: var(--black); border-color: var(--orange); }
+
+  .needs-badge { margin-left: 10px; vertical-align: middle; }
+
+  .resubmit-btn { margin-top: 14px; }
+  .resubmit-form {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px dashed rgba(255,255,255,0.2);
+  }
+  .resubmit-form .field { margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -279,7 +309,7 @@
       <div class="email-line" id="welcomeEmail"></div>
       <div class="stat-grid">
         <div class="stat"><div class="num" id="statVideos">—</div><div class="lbl">Videos submitted</div></div>
-        <div class="stat"><div class="num" id="statHours">—</div><div class="lbl">Hours logged</div></div>
+        <div class="stat"><div class="num" id="statHours">—</div><div class="lbl">Time logged</div></div>
         <div class="stat"><div class="num" id="statPaid">—</div><div class="lbl">Paid so far</div></div>
         <div class="stat"><div class="num" id="statOwed">—</div><div class="lbl">Still owed</div></div>
       </div>
@@ -300,8 +330,8 @@
         <textarea id="captionInput" placeholder="Caption text for this video"></textarea>
       </div>
       <div class="field">
-        <label for="hoursInput">Hours worked</label>
-        <input type="number" id="hoursInput" step="0.1" min="0" placeholder="e.g. 3.5">
+        <label for="minutesInput">Minutes worked</label>
+        <input type="number" id="minutesInput" step="1" min="0" placeholder="e.g. 45">
       </div>
       <button id="uploadBtn">Submit video</button>
       <div id="uploadProgress" class="msg hidden"></div>
@@ -309,9 +339,15 @@
     </div>
 
     <div class="card">
-      <h2>Your submissions</h2>
+      <h2>Your submissions <span class="badge Needs-Resubmission needs-badge hidden" id="needsBadge"></span></h2>
+      <div class="filter-row" id="filterRow">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="Needs Resubmission">Needs changes</button>
+        <button class="filter-btn" data-filter="In Review">In review</button>
+        <button class="filter-btn" data-filter="Approved">Approved</button>
+      </div>
       <div id="submissionsList"></div>
-      <div id="submissionsEmpty" class="meta hidden">No submissions yet.</div>
+      <div id="submissionsEmpty" class="meta hidden">No submissions match this filter.</div>
     </div>
   </div>
 
@@ -353,15 +389,19 @@ const statOwed = document.getElementById("statOwed");
 const titleInput = document.getElementById("titleInput");
 const fileInput = document.getElementById("fileInput");
 const captionInput = document.getElementById("captionInput");
-const hoursInput = document.getElementById("hoursInput");
+const minutesInput = document.getElementById("minutesInput");
 const uploadBtn = document.getElementById("uploadBtn");
 const uploadProgress = document.getElementById("uploadProgress");
 const uploadError = document.getElementById("uploadError");
 
 const submissionsList = document.getElementById("submissionsList");
 const submissionsEmpty = document.getElementById("submissionsEmpty");
+const needsBadge = document.getElementById("needsBadge");
+const filterRow = document.getElementById("filterRow");
 
 let currentEditor = null; // { id, name, email }
+let allSubmissions = [];  // full unfiltered list from the last refresh
+let activeFilter = "all";
 
 function showError(el, msg) {
   el.textContent = msg;
@@ -369,6 +409,27 @@ function showError(el, msg) {
 }
 function hideError(el) {
   el.classList.add("hidden");
+}
+
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+// Hours are stored in Airtable (for the payout formula); minutes are what editors enter.
+function minutesToHours(minutes) {
+  if (minutes === undefined || minutes === null || minutes === "") return undefined;
+  return Math.round((parseFloat(minutes) / 60) * 100) / 100;
+}
+function formatDuration(hoursVal) {
+  if (hoursVal === undefined || hoursVal === null || hoursVal === "") return "—";
+  const totalMinutes = Math.round(Number(hoursVal) * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }
 
 async function findEditorByEmail(email) {
@@ -415,27 +476,77 @@ function renderSubmissions(records) {
     const f = r.fields;
     const status = f["Status"] || "Submitted";
     const statusClass = status.replace(/\s+/g, "-");
+    const needsResubmit = status === "Needs Resubmission";
+    const existingMinutes = f["Hours Worked"] ? Math.round(Number(f["Hours Worked"]) * 60) : "";
     const div = document.createElement("div");
     div.className = "sub-item";
     div.innerHTML = `
       <span class="badge ${statusClass}">${status}</span>
-      <h3>${f["Title"] || "(untitled)"}</h3>
+      <h3>${escapeHtml(f["Title"]) || "(untitled)"}</h3>
       ${f["Video Link"] ? `<a class="videolink" href="${f["Video Link"]}" target="_blank" rel="noopener">View video</a>` : ""}
-      <div class="meta">Submitted ${f["Submitted Date"] || "—"}${f["Hours Worked"] ? ` · ${f["Hours Worked"]}h logged` : ""}</div>
-      ${f["Reviewer Notes"] ? `<div class="notes"><strong>Feedback:</strong> ${f["Reviewer Notes"]}</div>` : ""}
+      <div class="meta">Submitted ${f["Submitted Date"] || "—"}${f["Hours Worked"] ? ` · ${formatDuration(f["Hours Worked"])} logged` : ""}</div>
+      ${f["Reviewer Notes"] ? `<div class="notes"><strong>Feedback:</strong> ${escapeHtml(f["Reviewer Notes"])}</div>` : ""}
+      ${needsResubmit ? `
+        <button class="secondary resubmit-btn" data-toggle="${r.id}">Resubmit this video</button>
+        <div class="resubmit-form hidden" id="resubmit-${r.id}">
+          <div class="field">
+            <label>New video file</label>
+            <input type="file" accept="video/*" class="resubmit-file">
+          </div>
+          <div class="field">
+            <label>Caption</label>
+            <textarea class="resubmit-caption">${escapeHtml(f["Caption"])}</textarea>
+          </div>
+          <div class="field">
+            <label>Minutes worked</label>
+            <input type="number" class="resubmit-minutes" min="0" step="1" value="${existingMinutes}">
+          </div>
+          <button class="resubmit-submit-btn" data-id="${r.id}">Submit resubmission</button>
+          <div class="msg hidden resubmit-progress"></div>
+          <div class="error hidden resubmit-error"></div>
+        </div>
+      ` : ""}
     `;
     submissionsList.appendChild(div);
   });
 }
+
+function applyFilter() {
+  const filtered = activeFilter === "all"
+    ? allSubmissions
+    : allSubmissions.filter(r => (r.fields["Status"] || "Submitted") === activeFilter);
+  renderSubmissions(filtered);
+}
+
+function updateNeedsBadge() {
+  const count = allSubmissions.filter(r => (r.fields["Status"] || "Submitted") === "Needs Resubmission").length;
+  if (count > 0) {
+    needsBadge.textContent = `${count} need${count > 1 ? "" : "s"} changes`;
+    needsBadge.classList.remove("hidden");
+  } else {
+    needsBadge.classList.add("hidden");
+  }
+}
+
+filterRow.addEventListener("click", (e) => {
+  const btn = e.target.closest(".filter-btn");
+  if (!btn) return;
+  filterRow.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  activeFilter = btn.dataset.filter;
+  applyFilter();
+});
 
 async function refreshDashboard() {
   const [records, totals] = await Promise.all([
     fetchSubmissions(currentEditor.name),
     fetchEditorTotals(currentEditor.id)
   ]);
-  renderSubmissions(records);
+  allSubmissions = records;
+  updateNeedsBadge();
+  applyFilter();
   statVideos.textContent = records.length;
-  statHours.textContent = totals["Total Hours Logged"] ?? 0;
+  statHours.textContent = formatDuration(totals["Total Hours Logged"]);
   statPaid.textContent = money(totals["Total Paid"]);
   statOwed.textContent = money(totals["Total Owed"]);
 }
@@ -502,14 +613,14 @@ async function uploadToCloudinary(file, onProgress) {
   });
 }
 
-async function createSubmission({ title, videoUrl, caption, hours }) {
+async function createSubmission({ title, videoUrl, caption, minutes }) {
   const body = {
     fields: {
       "Title": title,
       "Editor": [currentEditor.id],
       "Video Link": videoUrl,
       "Caption": caption,
-      "Hours Worked": hours ? parseFloat(hours) : undefined,
+      "Hours Worked": minutesToHours(minutes),
       "Status": "Submitted",
       "Submitted Date": new Date().toISOString().split("T")[0]
     }
@@ -526,6 +637,31 @@ async function createSubmission({ title, videoUrl, caption, hours }) {
   return res.json();
 }
 
+// Used when an editor uploads a replacement for a video marked "Needs Resubmission".
+// Puts the record back into the review queue as "Submitted" and clears the old review date.
+async function updateSubmission(recordId, { videoUrl, caption, minutes }) {
+  const body = {
+    fields: {
+      "Video Link": videoUrl,
+      "Caption": caption,
+      "Hours Worked": minutesToHours(minutes),
+      "Status": "Submitted",
+      "Submitted Date": new Date().toISOString().split("T")[0],
+      "Review Date": null
+    }
+  };
+  const res = await fetch(`${AT_BASE_URL}/${encodeURIComponent(SUBMISSIONS_TABLE)}/${recordId}`, {
+    method: "PATCH",
+    headers: atHeaders(),
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error("Could not save the resubmission: " + errText);
+  }
+  return res.json();
+}
+
 uploadBtn.addEventListener("click", async () => {
   hideError(uploadError);
   uploadProgress.classList.add("hidden");
@@ -533,7 +669,7 @@ uploadBtn.addEventListener("click", async () => {
   const title = titleInput.value.trim();
   const file = fileInput.files[0];
   const caption = captionInput.value.trim();
-  const hours = hoursInput.value;
+  const minutes = minutesInput.value;
 
   if (!title) { showError(uploadError, "Give the video a title."); return; }
   if (!file) { showError(uploadError, "Choose a video file."); return; }
@@ -547,18 +683,66 @@ uploadBtn.addEventListener("click", async () => {
       uploadProgress.textContent = `Uploading video... ${pct}%`;
     });
     uploadProgress.textContent = "Saving to your submissions...";
-    await createSubmission({ title, videoUrl: cloudResult.secure_url, caption, hours });
+    await createSubmission({ title, videoUrl: cloudResult.secure_url, caption, minutes });
     uploadProgress.textContent = "Submitted. It'll show up below once reviewed.";
     titleInput.value = "";
     fileInput.value = "";
     captionInput.value = "";
-    hoursInput.value = "";
+    minutesInput.value = "";
     await refreshDashboard();
   } catch (e) {
     uploadProgress.classList.add("hidden");
     showError(uploadError, e.message || "Something went wrong.");
   } finally {
     uploadBtn.disabled = false;
+  }
+});
+
+// Toggle a resubmit form open/closed, and handle its submit button.
+submissionsList.addEventListener("click", async (e) => {
+  const toggleBtn = e.target.closest(".resubmit-btn");
+  if (toggleBtn) {
+    const formEl = document.getElementById(`resubmit-${toggleBtn.dataset.toggle}`);
+    formEl.classList.toggle("hidden");
+    return;
+  }
+
+  const submitBtn = e.target.closest(".resubmit-submit-btn");
+  if (submitBtn) {
+    const recordId = submitBtn.dataset.id;
+    const formEl = document.getElementById(`resubmit-${recordId}`);
+    const fileEl = formEl.querySelector(".resubmit-file");
+    const captionEl = formEl.querySelector(".resubmit-caption");
+    const minutesEl = formEl.querySelector(".resubmit-minutes");
+    const progressEl = formEl.querySelector(".resubmit-progress");
+    const errorEl = formEl.querySelector(".resubmit-error");
+
+    hideError(errorEl);
+    const file = fileEl.files[0];
+    if (!file) { showError(errorEl, "Choose the updated video file."); return; }
+
+    submitBtn.disabled = true;
+    progressEl.classList.remove("hidden");
+    progressEl.textContent = "Uploading video... 0%";
+
+    try {
+      const cloudResult = await uploadToCloudinary(file, (pct) => {
+        progressEl.textContent = `Uploading video... ${pct}%`;
+      });
+      progressEl.textContent = "Saving resubmission...";
+      await updateSubmission(recordId, {
+        videoUrl: cloudResult.secure_url,
+        caption: captionEl.value.trim(),
+        minutes: minutesEl.value
+      });
+      progressEl.textContent = "Resubmitted. It'll show up as Submitted once saved.";
+      await refreshDashboard();
+    } catch (e2) {
+      progressEl.classList.add("hidden");
+      showError(errorEl, e2.message || "Something went wrong.");
+    } finally {
+      submitBtn.disabled = false;
+    }
   }
 });
 
