@@ -517,13 +517,14 @@ function renderDashboard() {
   const list = videos.filter(f[2]);
   const ws = weekStart(today);
   const rateLine = editor.payModel === "Per Hour" ? `${money(editor.rate)} per hour` : `${money(editor.rate)} per video`;
+  const rateNote = editor.payModel === "Per Hour" ? "" : ", including one round of feedback and the caption";
 
   app.innerHTML = shell("dash", `
     <div class="hero">
       <div>
         <div class="eyebrow">${DAYS[today.getDay()]} ${today.getDate()} ${MONTHS[today.getMonth()]}</div>
         <h1 class="head">Hi, ${esc(editor.firstName)}</h1>
-        <p>You're paid <strong style="color:#fff">${rateLine}</strong>. Here's what you've submitted and what's been paid.</p>
+        <p>You're paid <strong style="color:#fff">${rateLine}</strong>${rateNote}. Here's what you've submitted and what's been paid.</p>
       </div>
       <a class="btn" href="#/submit">Submit a video</a>
     </div>
@@ -631,7 +632,7 @@ function renderVideo(id) {
         </div>
         <div class="error hidden" id="reError" role="alert"></div>
       </div>
-      <p class="small muted" style="margin:16px 0 0">The new version replaces this one in the same row. You're paid once per video, however many versions it takes.</p>
+      <p class="small muted" style="margin:16px 0 0">The new version replaces this one in the same row. Your rate per video includes one round of feedback.</p>
     </section>`;
   } else if (v.status === "Approved") {
     const when = v.publishAt ? new Date(v.publishAt) : null;
