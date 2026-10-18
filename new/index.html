@@ -252,6 +252,20 @@
   .hist { padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
   .hist:first-of-type { padding-top: 0; border-top: none; }
 
+  /* Caption check */
+  .check-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .check-box { border: 1px solid rgba(255,255,255,0.18); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: rgba(255,255,255,0.03); }
+  .check-box .vd { font-weight: 700; }
+  .check-box .vd.ok { color: var(--green); }
+  .check-box .vd.fix { color: var(--orange); }
+  .check-box .vd.work { color: var(--salmon); }
+  .check-box ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .check-box li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; }
+  .check-box .was { text-decoration: line-through; color: var(--salmon); }
+  .check-box .now { color: var(--green); font-weight: 700; }
+  .check-box .tone li { display: list-item; list-style: disc; margin-left: 18px; color: #E3EAE8; }
+  .fixbtn-sm { border: 1px solid rgba(255,255,255,0.3); background: none; color: var(--white); border-radius: 4px; padding: 4px 10px; min-height: 30px; cursor: pointer; font-size: 13px; }
+  .fixbtn-sm:hover { border-color: rgba(255,255,255,0.6); }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #154F46; color: var(--white); padding: 12px 18px; border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.3); font-size: 14px; z-index: 10; }
   .loading { padding: 80px 0; text-align: center; color: var(--muted); }
 
@@ -836,7 +850,7 @@ function renderVideo(id) {
       <h2 style="font-size:18px;margin-bottom:16px">Upload a new version</h2>
       <div style="display:flex;flex-direction:column;gap:16px">
         <div id="reDrop">${dropzone("reFile")}</div>
-        <div class="field"><label for="reCaption">Caption <span class="req">Required</span></label><textarea class="input" id="reCaption" rows="4" required>${esc(v.caption)}</textarea></div>
+        <div class="field"><label for="reCaption">Caption <span class="req">Required</span></label><textarea class="input" id="reCaption" rows="4" required spellcheck="true" lang="en-GB">${esc(v.caption)}</textarea><div class="check-row"><span></span><button type="button" class="btn ghost" data-act="checkCaption" data-for="reCaption">Check spelling and tone</button></div><div id="reCaptionCheck"></div></div>
         <div class="field"><label for="reMusic">Music <span class="req">Required</span></label><input class="input" id="reMusic" type="url" required placeholder="https://artlist.io/..." value="${esc(v.music)}"><span class="hint">Paste the Artlist link of the track you used.</span></div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
           <button class="btn" data-act="resubmit" data-id="${esc(v.id)}" id="reBtn" disabled>Submit new version</button>
@@ -920,8 +934,9 @@ function renderSubmit() {
       <div class="field"><label for="title">Title <span class="req">Required</span></label><input class="input" id="title" type="text" maxlength="200" required placeholder="e.g. Batch 5 - Reel 3 - Podium Celebration"></div>
       <div class="field">
         <label for="caption">Caption <span class="req">Required</span></label>
-        <textarea class="input" id="caption" rows="5" maxlength="2200" required placeholder="The caption that goes out with the post"></textarea>
-        <span class="hint" id="capCount">0 / 2,200 characters</span>
+        <textarea class="input" id="caption" rows="5" maxlength="2200" required spellcheck="true" lang="en-GB" placeholder="The caption that goes out with the post"></textarea>
+        <div class="check-row"><span class="hint" id="capCount">0 / 2,200 characters</span><button type="button" class="btn ghost" data-act="checkCaption" data-for="caption">Check spelling and tone</button></div>
+        <div id="captionCheck"></div>
       </div>
       <div class="field"><label for="music">Music <span class="req">Required</span></label><input class="input" id="music" type="url" required placeholder="https://artlist.io/..."><span class="hint">Paste the Artlist link of the track you used, so we know which licence covers it.</span></div>
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px">
@@ -1154,6 +1169,25 @@ app.addEventListener("change", (e) => {
   }
 });
 
+/* ---------- caption check (suggestions only; the caption stays the editor's) ---------- */
+const VERDICT = { "ready": ["Ready to go", "ok"], "small fixes": ["Small fixes", "fix"], "needs work": ["Needs work", "work"] };
+const lastCheck = {};
+function renderCheck(field) {
+  const box = document.getElementById(field + "Check");
+  const r = lastCheck[field];
+  if (!box) return;
+  if (!r) { box.innerHTML = ""; return; }
+  const [label, cls] = VERDICT[r.verdict] || VERDICT["small fixes"];
+  const spell = r.spelling.length ? `<div><div class="kv">Spelling and grammar</div><ul>${r.spelling.map((x, i) => `<li><span class="was">${esc(x.wrong)}</span><span aria-hidden="true">→</span><span class="now">${esc(x.right)}</span><button type="button" class="fixbtn-sm" data-act="applyFix" data-for="${field}" data-i="${i}">Fix</button></li>`).join("")}</ul></div>` : "";
+  const tone = r.tone.length ? `<div><div class="kv">NLT tone</div><ul class="tone">${r.tone.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>` : "";
+  box.innerHTML = `<div class="check-box" role="status">
+    <div class="vd ${cls}">${esc(label)}</div>
+    ${spell}${tone}
+    ${!spell && !tone ? `<div class="small muted">No spelling mistakes, and it fits the NLT voice.</div>` : ""}
+    <div class="small muted">Suggestions only. The caption stays yours.</div>
+  </div>`;
+}
+
 app.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-act]");
   if (!el) return;
@@ -1236,6 +1270,29 @@ app.addEventListener("click", async (e) => {
       go("#/"); toast("Submitted. It's in your list.");
     } catch (x) { fail(x.message); el.disabled = false; el.textContent = "Submit video"; }
   }
+  if (act === "checkCaption") {
+    const field = el.dataset.for;
+    const ta = document.getElementById(field);
+    const box = document.getElementById(field + "Check");
+    if (!ta || !box) return;
+    if (!ta.value.trim()) { box.innerHTML = `<div class="error">Write the caption first, then check it.</div>`; return; }
+    const label = el.textContent;
+    el.disabled = true; el.textContent = "Checking…";
+    try {
+      lastCheck[field] = await api("check-caption", { caption: ta.value, title: document.getElementById("title")?.value || "" });
+      renderCheck(field);
+    } catch (x) { box.innerHTML = `<div class="error">${esc(x.message)}</div>`; }
+    el.disabled = false; el.textContent = label;
+  }
+  if (act === "applyFix") {
+    const field = el.dataset.for, r = lastCheck[field], ta = document.getElementById(field);
+    const fix = r && r.spelling[Number(el.dataset.i)];
+    if (!fix || !ta) return;
+    if (ta.value.includes(fix.wrong)) ta.value = ta.value.replace(fix.wrong, fix.right);
+    r.spelling.splice(Number(el.dataset.i), 1);
+    if (field === "caption") document.getElementById("capCount").textContent = `${ta.value.length} / 2,200 characters`;
+    renderCheck(field);
+  }
   if (act === "resubmit") {
     const err = document.getElementById("reError");
     err.classList.add("hidden");
@@ -1300,6 +1357,13 @@ function mockApi(action, payload) {
   }
   return wait(200).then(() => {
     if (action === "dashboard") return JSON.parse(JSON.stringify(window.__mock));
+    if (action === "check-caption") {
+      const c = String(payload.caption || "");
+      const spelling = [["recieve", "receive"], ["its going", "it's going"], ["definately", "definitely"]].filter(([w]) => c.includes(w)).map(([wrong, right]) => ({ wrong, right }));
+      const tone = c.length > 160 ? ["The caption runs long. NLT captions are one or two short lines; cut it to the first sentence and the question."] : [];
+      if (/unleash|epic/i.test(c)) tone.push("Words like \u201cunleash\u201d and \u201cepic\u201d read like generic sport marketing. Describe what we see in the dive instead.");
+      return { verdict: tone.length ? "needs work" : spelling.length ? "small fixes" : "ready", spelling, tone };
+    }
     if (action === "review-queue") return { reviewer: window.__mock.reviewer, videos: JSON.parse(JSON.stringify(window.__mockQueue)) };
     if (action === "review") { const v = window.__mockQueue.find((x) => x.id === payload.id); Object.assign(v, { status: payload.decision === "approve" ? "Approved" : "Needs Resubmission", feedback: payload.notes, reviewed: iso(new Date()), reviewedBy: "Sample Reviewer", history: `${iso(new Date())} · Sample Reviewer · ${payload.decision === "approve" ? "Approved" : "Changes requested"}${payload.notes ? "\n" + payload.notes : ""}${v.history ? "\n\n" + v.history : ""}` }); return { ok: true }; }
     if (action === "submit") { window.__mock.videos.unshift({ id: "recSampleNew" + Date.now(), title: payload.title, status: "Submitted", submitted: iso(new Date()), videoUrl: "", caption: payload.caption, music: payload.music, feedback: "", amount: 8, paid: false }); return { ok: true }; }

@@ -3,6 +3,7 @@
 // Login: email -> 6-digit code by email -> session token (30 days).
 // Each editor only ever gets their own videos and payouts, and never any bank or payment-method fields.
 // Reviewers (Reviewers table, Active ticked) get the review queue and can approve or request changes.
+// Caption check: spelling and NLT tone notes from Claude. Suggestions only; it never writes a caption.
 // Payouts: every second Friday the Airtable "Pay run" automation creates one Payouts row per editor
 // (USD total, USD→PHP rate, pesos sent). Editors see them on the Payments page.
 
@@ -64,6 +65,56 @@ const R = {
   active: "fldlqaBZhYqwFk9U7",
 };
 const MUSIC_URL = /^https?:\/\/\S+\.\S+/i;
+
+const CLAUDE_MODEL = "claude-haiku-5-5";
+const CHECKS_PER_HOUR = 30;
+const CAPTION_VOICE = `You check social media captions for No Limits Tour (NLT), the professional cliff diving world tour. A video editor wrote the caption below. Point out spelling, grammar and punctuation mistakes, and say briefly where the caption drifts from NLT's voice.
+
+Never write a new caption and never rewrite whole sentences. The caption stays the editor's own work; you only point things out.
+
+NLT's voice for captions:
+- Short and punchy: one or two short lines. Let the dive speak.
+- Direct, confident and warm. Playful humour is welcome.
+- Often ends with a short question to the viewer, to get comments.
+- One or two emoji at the end of a line, not more.
+- British English spelling.
+- No em dashes.
+- No generic sport-marketing words such as unleash, ignite, elevate or epic journey.
+- No block of hashtags. A few relevant hashtags at the very end are fine.
+- Cliff diving is a professional sport: never call it a stunt, a show or a trick.
+
+Captions NLT has published:
+- The calm before the chaos. 👀 / What would be going through your mind up there?
+- \u201cI don\u2019t think I\u2019m ready yet.\u201d Famous last words. 😂🔥
+- Six divers. Six different ways to defy gravity. ⚡️ / Which jump caught your eye? 👀
+- When the air becomes your dance floor. 🪽 / Would you call this art or adrenaline? 👇
+- Be honest\u2026 how many spins did you count? 🌀👇
+- Different style. Same love for the air. Which is yours?
+- Hard work paid off. 🏆
+- Oui oui\u2026 straight to the water. 😂
+
+How to answer:
+- spelling: only real mistakes. "wrong" is copied exactly from the caption, a few words long, and "right" is the corrected version of that same snippet. Leave names, emoji, hashtags, deliberate slang and style choices alone.
+- tone: at most three notes, one short sentence each, in plain English. Each note names the part of the caption it is about and says what to change. Leave it empty when the caption fits the voice.
+- verdict: "ready" when nothing important needs changing, "small fixes" for spelling or small tone points, "needs work" when the caption clearly misses the voice or is hard to understand.`;
+const CHECK_SCHEMA = {
+  type: "object",
+  properties: {
+    verdict: { type: "string", enum: ["ready", "small fixes", "needs work"] },
+    spelling: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { wrong: { type: "string" }, right: { type: "string" } },
+        required: ["wrong", "right"],
+        additionalProperties: false,
+      },
+    },
+    tone: { type: "array", items: { type: "string" } },
+  },
+  required: ["verdict", "spelling", "tone"],
+  additionalProperties: false,
+};
 
 const ALLOWED_ORIGINS = new Set([
   "https://editors.the-nlt.com",
@@ -590,6 +641,60 @@ async function review(req: Request, body: Record<string, unknown>) {
   return { ok: true, status };
 }
 
+// ---------- caption check ----------
+
+async function checkCaption(req: Request, body: Record<string, unknown>) {
+  const s = await sessionFrom(req);
+  const caption = clip(body.caption, 2200);
+  if (!caption) throw new HttpError(400, "Write the caption first, then check it.");
+  const key = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!key) throw new HttpError(503, "The caption check isn't switched on yet.");
+
+  const who = s.editorId ?? s.reviewerId ?? s.email;
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { count } = await db.from("caption_checks").select("id", { count: "exact", head: true })
+    .eq("who", who).gte("created_at", since);
+  if ((count ?? 0) >= CHECKS_PER_HOUR) throw new HttpError(429, "That's a lot of checks for one hour. Wait a bit, then check again.");
+  await db.from("caption_checks").insert({ who });
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30000);
+  let res: Response;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 2000,
+        system: CAPTION_VOICE,
+        messages: [{ role: "user", content: `Caption to check:\n\n${caption}` }],
+        output_config: { format: { type: "json_schema", schema: CHECK_SCHEMA } },
+      }),
+    });
+  } catch (e) {
+    console.error("claude", e);
+    throw new HttpError(504, "The check took too long. Try again in a moment.");
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    console.error("claude", res.status, await res.text());
+    throw new HttpError(502, "The caption check isn't available right now. Try again in a minute.");
+  }
+  const data = await res.json();
+  const text = (data.content ?? []).find((b: { type: string }) => b.type === "text")?.text ?? "";
+  let out: { verdict?: string; spelling?: { wrong: string; right: string }[]; tone?: string[] };
+  try { out = JSON.parse(text); } catch { throw new HttpError(502, "The caption check gave an answer we couldn't read. Try again."); }
+  const spelling = (out.spelling ?? [])
+    .filter((x) => x && x.wrong && x.right && x.wrong !== x.right && caption.includes(x.wrong))
+    .slice(0, 12);
+  const tone = (out.tone ?? []).filter((t) => typeof t === "string" && t.trim()).slice(0, 3);
+  const verdict = ["ready", "small fixes", "needs work"].includes(out.verdict ?? "") ? out.verdict : (spelling.length || tone.length ? "small fixes" : "ready");
+  return { verdict, spelling, tone };
+}
+
 async function logout(req: Request) {
   const s = await sessionFrom(req);
   await db.from("sessions").delete().eq("token_hash", await sha256(s.token));
@@ -612,8 +717,9 @@ Deno.serve(async (req) => {
       case "resubmit": return json(await resubmit(req, body), 200, origin);
       case "review-queue": return json(await reviewQueue(req), 200, origin);
       case "review": return json(await review(req, body), 200, origin);
+      case "check-caption": return json(await checkCaption(req, body), 200, origin);
       case "logout": return json(await logout(req), 200, origin);
-      case "ping": return json({ ok: true, airtable: !!Deno.env.get("AIRTABLE_PORTAL_TOKEN"), mail: !!Deno.env.get("MAIL_APP_PASSWORD") }, 200, origin);
+      case "ping": return json({ ok: true, airtable: !!Deno.env.get("AIRTABLE_PORTAL_TOKEN"), mail: !!Deno.env.get("MAIL_APP_PASSWORD"), checker: !!Deno.env.get("ANTHROPIC_API_KEY") }, 200, origin);
       default: return json({ error: "Unknown action." }, 400, origin);
     }
   } catch (e) {
