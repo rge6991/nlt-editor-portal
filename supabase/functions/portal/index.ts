@@ -2,6 +2,7 @@
 // The browser never sees an Airtable key: every read and write goes through here.
 // Login: email -> 6-digit code by email -> session token (30 days).
 // Each editor only ever gets their own videos, and never any bank or payment-method fields.
+// Reviewers (Reviewers table, Active ticked) get the review queue and can approve or request changes.
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import nodemailer from "npm:nodemailer@6.9.16";
@@ -9,6 +10,7 @@ import nodemailer from "npm:nodemailer@6.9.16";
 const AIRTABLE = "https://api.airtable.com/v0/app9LXJtFUqO3VN0V";
 const T_EDITORS = "tbla4YKeVLmMN8Ay6";
 const T_VIDEOS = "tblZm9wz5Truwc9au";
+const T_REVIEWERS = "tblqHqYCyBNKqq88k";
 
 // Airtable field IDs (stable even if a field is renamed).
 const E = {
@@ -33,7 +35,15 @@ const V = {
   music: "fldQucuoYYNVYRR8X",
   publishAt: "fldWF7Wc4dwMa8333",
   posted: "fldNaAVRjB5BfCR23",
+  reviewedBy: "fldeWUK7NvZf4WPgh",
+  history: "fldlI5mW1Hv3SHPDb",
 };
+const R = {
+  name: "fldgefYb3VGVGtecX",
+  email: "fldIXnAPbLeygkjBu",
+  active: "fldlqaBZhYqwFk9U7",
+};
+const MUSIC_URL = /^https?:\/\/\S+\.\S+/i;
 
 const ALLOWED_ORIGINS = new Set([
   "https://editors.the-nlt.com",
@@ -167,6 +177,43 @@ async function getVideos(ids: string[]) {
   return out;
 }
 
+// ---------- reviewers ----------
+
+async function findReviewerByEmail(email: string) {
+  const formula = encodeURIComponent(`AND(LOWER(TRIM({Email}))="${email}",{Active})`);
+  const fields = [R.name, R.email, R.active].map((f) => `fields[]=${f}`).join("&");
+  const data = await airtable(`${T_REVIEWERS}?filterByFormula=${formula}&${fields}&returnFieldsByFieldId=true&maxRecords=1`);
+  return data.records?.[0] ?? null;
+}
+
+// Returns the reviewer if they are still Active, otherwise null.
+async function activeReviewer(id: string) {
+  const formula = encodeURIComponent(`RECORD_ID()="${id}"`);
+  const fields = [R.name, R.active].map((f) => `fields[]=${f}`).join("&");
+  const data = await airtable(`${T_REVIEWERS}?filterByFormula=${formula}&${fields}&returnFieldsByFieldId=true&maxRecords=1`);
+  const rec = data.records?.[0];
+  if (!rec || rec.fields?.[R.active] !== true) return null;
+  return { id: rec.id as string, name: String(rec.fields?.[R.name] ?? "Reviewer") };
+}
+
+async function requireReviewer(s: { reviewerId: string | null }) {
+  if (!s.reviewerId) throw new HttpError(403, "This account can't review videos.");
+  const r = await activeReviewer(s.reviewerId);
+  if (!r) throw new HttpError(403, "Your reviewer access has been switched off.");
+  return r;
+}
+
+async function editorNames(): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  let offset = "";
+  do {
+    const data = await airtable(`${T_EDITORS}?fields[]=${E.name}&returnFieldsByFieldId=true&pageSize=100${offset ? `&offset=${offset}` : ""}`);
+    for (const r of data.records ?? []) names.set(r.id, String(r.fields?.[E.name] ?? ""));
+    offset = data.offset ?? "";
+  } while (offset);
+  return names;
+}
+
 function shapeVideo(rec: { id: string; fields: Record<string, unknown> }) {
   const f = rec.fields;
   const link = String(f[V.link] ?? "");
@@ -193,11 +240,16 @@ async function sessionFrom(req: Request) {
   const auth = req.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
   if (!token) throw new HttpError(401, "Log in to continue.");
-  const { data, error } = await db.from("sessions").select("editor_id, email, expires_at")
+  const { data, error } = await db.from("sessions").select("editor_id, reviewer_id, email, expires_at")
     .eq("token_hash", await sha256(token)).maybeSingle();
   if (error) throw new HttpError(500, "Something went wrong. Try again.");
   if (!data || new Date(data.expires_at) < new Date()) throw new HttpError(401, "Your session has ended. Log in again.");
-  return { editorId: data.editor_id as string, email: data.email as string, token };
+  return {
+    editorId: (data.editor_id as string | null) ?? null,
+    reviewerId: (data.reviewer_id as string | null) ?? null,
+    email: data.email as string,
+    token,
+  };
 }
 
 // ---------- email ----------
@@ -236,15 +288,16 @@ async function requestCode(body: Record<string, unknown>) {
     .eq("email", email).gte("created_at", since);
   if ((count ?? 0) >= MAX_CODES_PER_HOUR) throw new HttpError(429, "Too many codes requested. Wait an hour, then try again.");
 
-  const editor = await findEditorByEmail(email);
-  if (!editor) throw new HttpError(404, "That email isn't on the editors list. Check with Raphael if you think this is wrong.");
+  const [editor, reviewer] = await Promise.all([findEditorByEmail(email), findReviewerByEmail(email)]);
+  if (!editor && !reviewer) throw new HttpError(404, "That email isn't on the editor or reviewer list. Check with Raphael if you think this is wrong.");
+  const person = String(editor?.fields?.[E.name] ?? reviewer?.fields?.[R.name] ?? "");
 
   const code = randomCode();
   const expires = new Date(Date.now() + CODE_TTL_MIN * 60 * 1000).toISOString();
   const { error } = await db.from("login_codes").insert({ email, code_hash: await sha256(`${email}:${code}`), expires_at: expires });
   if (error) throw new HttpError(500, "Something went wrong. Try again.");
   try {
-    await sendCodeEmail(email, String(editor.fields?.[E.name] ?? ""), code);
+    await sendCodeEmail(email, person, code);
   } catch (e) {
     if (e instanceof HttpError) throw e;
     console.error("mail", e);
@@ -268,77 +321,191 @@ async function verifyCode(body: Record<string, unknown>) {
   }
   await db.from("login_codes").delete().eq("email", email);
 
-  const editor = await findEditorByEmail(email);
-  if (!editor) throw new HttpError(404, "That email isn't on the editors list.");
+  const [editor, reviewer] = await Promise.all([findEditorByEmail(email), findReviewerByEmail(email)]);
+  if (!editor && !reviewer) throw new HttpError(404, "That email isn't on the editor or reviewer list.");
   const token = randomToken();
   const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const { error } = await db.from("sessions").insert({ token_hash: await sha256(token), editor_id: editor.id, email, expires_at: expires });
+  const { error } = await db.from("sessions").insert({
+    token_hash: await sha256(token),
+    editor_id: editor?.id ?? null,
+    reviewer_id: reviewer?.id ?? null,
+    email,
+    expires_at: expires,
+  });
   if (error) throw new HttpError(500, "Something went wrong. Try again.");
   return { token };
 }
 
 async function dashboard(req: Request) {
   const s = await sessionFrom(req);
-  const ed = await getEditor(s.editorId);
-  const ids = (ed.fields?.[E.videos] as string[] | undefined) ?? [];
-  const videos = (await getVideos(ids)).map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }))
-    .sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
-  const name = String(ed.fields?.[E.name] ?? "");
-  return {
-    editor: {
+  // Someone added to Reviewers after logging in gets review access without logging in again.
+  if (!s.reviewerId) {
+    const r = await findReviewerByEmail(s.email);
+    if (r) {
+      s.reviewerId = r.id as string;
+      await db.from("sessions").update({ reviewer_id: s.reviewerId }).eq("token_hash", await sha256(s.token));
+    }
+  }
+  const [ed, reviewer] = await Promise.all([
+    s.editorId ? getEditor(s.editorId) : Promise.resolve(null),
+    s.reviewerId ? activeReviewer(s.reviewerId) : Promise.resolve(null),
+  ]);
+  if (!ed && !reviewer) throw new HttpError(401, "Your session has ended. Log in again.");
+  let editor = null;
+  let videos: ReturnType<typeof shapeVideo>[] = [];
+  if (ed) {
+    const ids = (ed.fields?.[E.videos] as string[] | undefined) ?? [];
+    videos = (await getVideos(ids)).map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }))
+      .sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
+    const name = String(ed.fields?.[E.name] ?? "");
+    editor = {
       name,
       firstName: name.split(" ")[0] || name,
       email: s.email,
       rate: payoutNumber(ed.fields?.[E.rate]),
       payModel: selectName(ed.fields?.[E.payModel]) || "Per Video",
-    },
+    };
+  }
+  return {
+    editor,
+    reviewer: reviewer ? { name: reviewer.name, firstName: reviewer.name.split(" ")[0] || reviewer.name, email: s.email } : null,
     videos,
   };
 }
 
+function requireEditor(s: { editorId: string | null }): string {
+  if (!s.editorId) throw new HttpError(403, "Only editors can submit videos.");
+  return s.editorId;
+}
+
+function requiredSubmission(body: Record<string, unknown>) {
+  const caption = clip(body.caption, 2200);
+  const music = clip(body.music, 1000);
+  if (!caption) throw new HttpError(400, "Add the caption.");
+  if (!MUSIC_URL.test(music)) throw new HttpError(400, "Paste the Artlist link of the track you used.");
+  return { caption, music };
+}
+
 async function submit(req: Request, body: Record<string, unknown>) {
   const s = await sessionFrom(req);
+  const editorId = requireEditor(s);
   const title = clip(body.title, 200);
   const videoUrl = clip(body.videoUrl, 1000);
-  if (!title) throw new HttpError(400, "Give the video a title.");
   if (!CLOUDINARY_VIDEO.test(videoUrl)) throw new HttpError(400, "Upload the video file first.");
-  const music = clip(body.music, 1000);
+  if (!title) throw new HttpError(400, "Give the video a title.");
+  const { caption, music } = requiredSubmission(body);
   const fields: Record<string, unknown> = {
     [V.title]: title,
-    [V.editor]: [s.editorId],
+    [V.editor]: [editorId],
     [V.link]: videoUrl,
-    [V.caption]: clip(body.caption, 2200),
+    [V.caption]: caption,
+    [V.music]: music,
     [V.status]: "Submitted",
     [V.submitted]: viennaToday(),
   };
-  if (/^https?:\/\//i.test(music)) fields[V.music] = music;
   const data = await airtable(T_VIDEOS, { method: "POST", body: JSON.stringify({ records: [{ fields }], typecast: true }) });
   return { id: data.records?.[0]?.id };
 }
 
 async function resubmit(req: Request, body: Record<string, unknown>) {
   const s = await sessionFrom(req);
+  const editorId = requireEditor(s);
   const id = clip(body.id, 20);
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new HttpError(400, "Unknown video.");
   const videoUrl = clip(body.videoUrl, 1000);
   if (!CLOUDINARY_VIDEO.test(videoUrl)) throw new HttpError(400, "Upload the new video file first.");
+  const { caption, music } = requiredSubmission(body);
 
   const [rec] = await getVideos([id]) as { id: string; fields: Record<string, unknown> }[];
   const owner = (rec?.fields?.[V.editor] as string[] | undefined) ?? [];
-  if (!rec || !owner.includes(s.editorId)) throw new HttpError(404, "Unknown video.");
+  if (!rec || !owner.includes(editorId)) throw new HttpError(404, "Unknown video.");
   if (selectName(rec.fields[V.status]) !== "Needs Resubmission") throw new HttpError(400, "This video isn't waiting for changes.");
 
+  const today = viennaToday();
+  const prev = String(rec.fields[V.history] ?? "").trim();
+  const entry = `${today} · Editor · New version submitted`;
   const fields: Record<string, unknown> = {
     [V.link]: videoUrl,
-    [V.caption]: clip(body.caption, 2200),
+    [V.caption]: caption,
+    [V.music]: music,
     [V.status]: "Submitted",
-    [V.submitted]: viennaToday(),
+    [V.submitted]: today,
     [V.reviewed]: null,
+    [V.history]: prev ? `${entry}\n\n${prev}` : entry,
   };
-  const music = clip(body.music, 1000);
-  if (/^https?:\/\//i.test(music)) fields[V.music] = music;
   await airtable(T_VIDEOS, { method: "PATCH", body: JSON.stringify({ records: [{ id, fields }], typecast: true }) });
   return { ok: true };
+}
+
+// ---------- review ----------
+
+const QUEUE_FORMULA = `OR({Status}="Submitted",{Status}="In Review",{Status}="Needs Resubmission",AND({Status}="Approved",IS_AFTER({Review Date},DATEADD(TODAY(),-15,'days'))))`;
+
+async function reviewQueue(req: Request) {
+  const s = await sessionFrom(req);
+  const reviewer = await requireReviewer(s);
+  const fields = [V.title, V.editor, V.caption, V.status, V.notes, V.submitted, V.reviewed, V.link, V.music, V.reviewedBy, V.history]
+    .map((f) => `fields[]=${f}`).join("&");
+  const recs: { id: string; fields: Record<string, unknown> }[] = [];
+  let offset = "";
+  do {
+    const data = await airtable(`${T_VIDEOS}?filterByFormula=${encodeURIComponent(QUEUE_FORMULA)}&${fields}&returnFieldsByFieldId=true&pageSize=100${offset ? `&offset=${offset}` : ""}`);
+    recs.push(...(data.records ?? []));
+    offset = data.offset ?? "";
+  } while (offset && recs.length < 500);
+  const names = await editorNames();
+  const videos = recs.map((r) => {
+    const f = r.fields;
+    const link = String(f[V.link] ?? "");
+    const editorName = ((f[V.editor] as string[] | undefined) ?? []).map((id) => names.get(id) ?? "").filter(Boolean).join(", ");
+    return {
+      id: r.id,
+      title: String(f[V.title] ?? ""),
+      editor: editorName || "Unknown editor",
+      status: selectName(f[V.status]) || "Submitted",
+      submitted: String(f[V.submitted] ?? ""),
+      reviewed: String(f[V.reviewed] ?? ""),
+      videoUrl: /^https:\/\//.test(link) ? link : "",
+      caption: String(f[V.caption] ?? ""),
+      music: String(f[V.music] ?? ""),
+      feedback: String(f[V.notes] ?? ""),
+      reviewedBy: String(f[V.reviewedBy] ?? ""),
+      history: String(f[V.history] ?? ""),
+    };
+  }).sort((a, b) => (a.submitted || "").localeCompare(b.submitted || ""));
+  return { reviewer: { name: reviewer.name }, videos };
+}
+
+async function review(req: Request, body: Record<string, unknown>) {
+  const s = await sessionFrom(req);
+  const reviewer = await requireReviewer(s);
+  const id = clip(body.id, 20);
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new HttpError(400, "Unknown video.");
+  const decision = String(body.decision ?? "");
+  if (decision !== "approve" && decision !== "changes") throw new HttpError(400, "Choose Approve or Request changes.");
+  const notes = clip(body.notes, 5000);
+  if (decision === "changes" && !notes) throw new HttpError(400, "Write what needs changing, so the editor knows what to fix.");
+
+  const [rec] = await getVideos([id]) as { id: string; fields: Record<string, unknown> }[];
+  if (!rec) throw new HttpError(404, "That video isn't in Airtable any more.");
+  if (selectName(rec.fields[V.status]) === "Approved") {
+    throw new HttpError(409, "This video is already approved. If that needs undoing, change it in Airtable.");
+  }
+
+  const today = viennaToday();
+  const status = decision === "approve" ? "Approved" : "Needs Resubmission";
+  const label = decision === "approve" ? "Approved" : "Changes requested";
+  const entry = `${today} · ${reviewer.name} · ${label}${notes ? `\n${notes}` : ""}`;
+  const prev = String(rec.fields[V.history] ?? "").trim();
+  const fields: Record<string, unknown> = {
+    [V.status]: status,
+    [V.notes]: notes,
+    [V.reviewed]: today,
+    [V.reviewedBy]: reviewer.name,
+    [V.history]: prev ? `${entry}\n\n${prev}` : entry,
+  };
+  await airtable(T_VIDEOS, { method: "PATCH", body: JSON.stringify({ records: [{ id, fields }], typecast: true }) });
+  return { ok: true, status };
 }
 
 async function logout(req: Request) {
@@ -361,6 +528,8 @@ Deno.serve(async (req) => {
       case "dashboard": return json(await dashboard(req), 200, origin);
       case "submit": return json(await submit(req, body), 200, origin);
       case "resubmit": return json(await resubmit(req, body), 200, origin);
+      case "review-queue": return json(await reviewQueue(req), 200, origin);
+      case "review": return json(await review(req, body), 200, origin);
       case "logout": return json(await logout(req), 200, origin);
       case "ping": return json({ ok: true, airtable: !!Deno.env.get("AIRTABLE_PORTAL_TOKEN"), mail: !!Deno.env.get("MAIL_APP_PASSWORD") }, 200, origin);
       default: return json({ error: "Unknown action." }, 400, origin);

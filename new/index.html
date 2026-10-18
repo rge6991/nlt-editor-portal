@@ -203,6 +203,28 @@
   .progress { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.12); overflow: hidden; margin-top: 10px; }
   .progress div { height: 6px; background: var(--orange); width: 0%; transition: width 0.2s; }
 
+  /* Required marker, nav count */
+  .req { font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 6px; }
+  .count { display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 4px; border-radius: 10px; background: var(--orange); color: #0A0A0A; font-size: 12px; font-weight: 700; text-align: center; }
+  .late { color: var(--salmon); font-weight: 700; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* Review */
+  .btn.fixbtn { background: transparent; color: var(--salmon); box-shadow: inset 0 0 0 1px rgba(255,159,128,0.7); }
+  .btn.fixbtn:hover { color: var(--salmon); background: rgba(255,159,128,0.08); }
+  .notes { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .notes li { display: flex; align-items: flex-start; gap: 10px; background: rgba(255,255,255,0.05); border-radius: 6px; padding: 8px 8px 8px 10px; }
+  .tchip { flex: 0 0 auto; border: none; cursor: pointer; background: rgba(240,120,29,0.2); color: var(--orange-soft); font-weight: 700; font-size: 13px; border-radius: 4px; padding: 4px 8px; min-height: 28px; font-variant-numeric: tabular-nums; }
+  .ntext { flex: 1 1 auto; min-width: 0; color: #E3EAE8; overflow-wrap: anywhere; padding-top: 3px; }
+  .nx { flex: 0 0 auto; border: none; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; width: 32px; height: 32px; border-radius: 4px; }
+  .nx:hover { color: var(--white); background: rgba(255,255,255,0.08); }
+  .addnote { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 6px; }
+  .addnote .ntime { flex: 0 0 84px; text-align: center; font-variant-numeric: tabular-nums; }
+  .addnote #nText { flex: 1 1 220px; }
+  .addnote .btn { flex: 0 0 auto; }
+  .hist { padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+  .hist:first-of-type { padding-top: 0; border-top: none; }
+
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #154F46; color: var(--white); padding: 12px 18px; border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.3); font-size: 14px; z-index: 10; }
   .loading { padding: 80px 0; text-align: center; color: var(--muted); }
 
@@ -268,7 +290,7 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-const state = { data: null, period: "week", filter: "all", shown: PAGE, upload: null, reupload: null };
+const state = { data: null, period: "week", filter: "all", shown: PAGE, upload: null, reupload: null, queue: null, rtab: "todo", drafts: {} };
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -286,6 +308,23 @@ function thumbUrl(url, w = 96, h = 136) {
   if (!CLOUD_VIDEO.test(url || "")) return "";
   return url.replace("/video/upload/", `/video/upload/so_1,w_${w},h_${h},c_fill,q_auto/`).replace(/\.[a-z0-9]+(\?.*)?$/i, ".jpg");
 }
+const clock = (sec) => { const t = Math.max(0, Math.floor(Number(sec) || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+function seconds(txt) {
+  const m = String(txt || "").trim().match(/^(\d+):(\d{1,2})$/);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  const n = Number(String(txt || "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+function daysSince(s) {
+  if (!s) return 0;
+  const a = parseDay(s), b = new Date();
+  return Math.max(0, Math.round((new Date(b.getFullYear(), b.getMonth(), b.getDate()) - a) / 86400000));
+}
+const ageLabel = (s) => { const d = daysSince(s); return d === 0 ? "Today" : d === 1 ? "1 day" : `${d} days`; };
+const MUSIC_URL = /^https?:\/\/\S+\.\S+/i;
+const isEditor = () => !!state.data?.editor;
+const isReviewer = () => !!state.data?.reviewer;
+
 function toast(msg) {
   const t = document.createElement("div");
   t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg;
@@ -348,6 +387,12 @@ async function ensureData(force = false) {
   return state.data;
 }
 
+async function ensureQueue(force = false) {
+  if (state.queue && !force) return state.queue;
+  state.queue = (await api("review-queue")).videos;
+  return state.queue;
+}
+
 async function render() {
   const h = location.hash || "#/";
   if (!store.token && !MOCK) {
@@ -355,14 +400,18 @@ async function render() {
     return renderLogin();
   }
   if (h === "#/login" || h === "#/code") { go("#/"); return; }
-  app.innerHTML = shell("", `<div class="loading">Loading your videos…</div>`);
+  app.innerHTML = shell("", `<div class="loading">Loading…</div>`);
   try {
     await ensureData();
+    if (h.startsWith("#/review") && isReviewer()) await ensureQueue();
   } catch (e) {
     if (!store.token && !MOCK) return;
     app.innerHTML = shell("", `<div class="loading">${esc(e.message)} <button class="linkbtn" data-act="retry">Try again</button></div>`);
     return;
   }
+  if (h.startsWith("#/review/") && isReviewer()) return renderReview(h.slice(9));
+  if (h === "#/review" && isReviewer()) return renderQueue();
+  if (!isEditor()) { go("#/review"); return; }
   if (h.startsWith("#/video/")) return renderVideo(h.slice(8));
   if (h === "#/submit") return renderSubmit();
   return renderDashboard();
@@ -374,14 +423,16 @@ const PHOTO = document.getElementById("photo-tpl").getAttribute("data-src");
 const ARROW = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>`;
 
 function shell(active, inner) {
-  const ed = state.data?.editor;
+  const ed = state.data?.editor || state.data?.reviewer;
   const initials = ed ? ed.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() : "";
+  const link = (key, href, label, extra = "") => `<a href="${href}" class="${active === key ? "on" : ""}" ${active === key ? 'aria-current="page"' : ""}>${label}${extra}</a>`;
+  const waiting = state.queue ? state.queue.filter((v) => v.status === "Submitted" || v.status === "In Review").length : 0;
   return `
   <header class="top"><div class="top-in">
-    <a class="brand" href="#/" aria-label="No Limits Tour editor portal, dashboard">${LOGO_SVG}<span class="sep"></span><span class="tag">Editor portal</span></a>
+    <a class="brand" href="#/" aria-label="No Limits Tour editor portal, home">${LOGO_SVG}<span class="sep"></span><span class="tag">Editor portal</span></a>
     <nav class="main" aria-label="Main">
-      <a href="#/" class="${active === "dash" ? "on" : ""}" ${active === "dash" ? 'aria-current="page"' : ""}>Dashboard</a>
-      <a href="#/submit" class="${active === "submit" ? "on" : ""}" ${active === "submit" ? 'aria-current="page"' : ""}>Submit a video</a>
+      ${isEditor() ? link("dash", "#/", "Dashboard") + link("submit", "#/submit", "Submit a video") : ""}
+      ${isReviewer() ? link("review", "#/review", "Review", waiting ? ` <span class="count">${waiting}</span>` : "") : ""}
       ${ed ? `<span class="who"><span class="avatar" aria-hidden="true">${esc(initials)}</span>${esc(ed.name)}</span>` : ""}
       <button class="linkbtn" style="color:var(--soft)" data-act="logout">Log out</button>
     </nav>
@@ -415,7 +466,7 @@ function renderLogin() {
     <div style="display:flex;flex-direction:column;gap:12px">
       <div class="eyebrow">No Limits Tour</div>
       <h1 class="head">Editor portal</h1>
-      <p>Log in with the email you're registered with. We'll send you a 6-digit code.</p>
+      <p>Log in with the email you're registered with. We'll send you a 6-digit code. Editors and reviewers both log in here.</p>
     </div>
     <form id="emailForm" style="display:flex;flex-direction:column;gap:18px" novalidate>
       <div class="field">
@@ -624,8 +675,8 @@ function renderVideo(id) {
       <h2 style="font-size:18px;margin-bottom:16px">Upload a new version</h2>
       <div style="display:flex;flex-direction:column;gap:16px">
         <div id="reDrop">${dropzone("reFile")}</div>
-        <div class="field"><label for="reCaption">Caption</label><textarea class="input" id="reCaption" rows="4">${esc(v.caption)}</textarea></div>
-        <div class="field"><label for="reMusic">Music</label><input class="input" id="reMusic" type="url" placeholder="https://artlist.io/..." value="${esc(v.music)}"><span class="hint">Paste the Artlist link of the track you used.</span></div>
+        <div class="field"><label for="reCaption">Caption <span class="req">Required</span></label><textarea class="input" id="reCaption" rows="4" required>${esc(v.caption)}</textarea></div>
+        <div class="field"><label for="reMusic">Music <span class="req">Required</span></label><input class="input" id="reMusic" type="url" required placeholder="https://artlist.io/..." value="${esc(v.music)}"><span class="hint">Paste the Artlist link of the track you used.</span></div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
           <button class="btn" data-act="resubmit" data-id="${esc(v.id)}" id="reBtn" disabled>Submit new version</button>
           <span class="small muted" id="reHint">Add the new file first.</span>
@@ -704,14 +755,14 @@ function renderSubmit() {
       <p style="margin:0;font-size:16px;color:var(--soft)">Upload your finished cut, then add the caption and the track you used.</p>
     </div>
     <section class="card" style="max-width:760px;display:flex;flex-direction:column;gap:22px" aria-label="Video details">
-      <div class="field"><span style="font-size:14px;font-weight:700">Video file</span><div id="drop">${dropzone("file")}</div></div>
-      <div class="field"><label for="title">Title</label><input class="input" id="title" type="text" maxlength="200" placeholder="e.g. Batch 5 - Reel 3 - Podium Celebration"></div>
+      <div class="field"><span style="font-size:14px;font-weight:700">Video file <span class="req">Required</span></span><div id="drop">${dropzone("file")}</div></div>
+      <div class="field"><label for="title">Title <span class="req">Required</span></label><input class="input" id="title" type="text" maxlength="200" required placeholder="e.g. Batch 5 - Reel 3 - Podium Celebration"></div>
       <div class="field">
-        <label for="caption">Caption</label>
-        <textarea class="input" id="caption" rows="5" maxlength="2200" placeholder="The caption that goes out with the post"></textarea>
+        <label for="caption">Caption <span class="req">Required</span></label>
+        <textarea class="input" id="caption" rows="5" maxlength="2200" required placeholder="The caption that goes out with the post"></textarea>
         <span class="hint" id="capCount">0 / 2,200 characters</span>
       </div>
-      <div class="field"><label for="music">Music</label><input class="input" id="music" type="url" placeholder="https://artlist.io/..."><span class="hint">Paste the Artlist link of the track you used, so we know which licence covers it.</span></div>
+      <div class="field"><label for="music">Music <span class="req">Required</span></label><input class="input" id="music" type="url" required placeholder="https://artlist.io/..."><span class="hint">Paste the Artlist link of the track you used, so we know which licence covers it.</span></div>
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px">
         <button class="btn" data-act="submit" id="submitBtn">Submit video</button>
         <a href="#/" class="small" style="color:var(--soft)">Cancel</a>
@@ -726,13 +777,171 @@ async function startUpload(file, boxId, onDone) {
   try {
     const url = await uploadToCloudinary(file, (p) => {
       const l = document.getElementById("pctLabel"), b = document.getElementById("pctBar");
-      if (l) l.textContent = `Uploading… ${p}%`;
+      if (l) l.textContent = p >= 100 ? "Uploaded. Processing the video, this can take a minute for big files…" : `Uploading… ${p}%`;
       if (b) b.style.width = p + "%";
     });
     onDone({ url, name: file.name, size: file.size });
   } catch (e) {
     box.innerHTML = dropzone(boxId === "drop" ? "file" : "reFile") + `<div class="error" style="margin-top:8px">${esc(e.message)}</div>`;
   }
+}
+
+/* ---------- review (team only) ---------- */
+const RTABS = [
+  ["todo", "To review", (v) => v.status === "Submitted" || v.status === "In Review"],
+  ["waiting", "Waiting on editor", (v) => v.status === "Needs Resubmission"],
+  ["done", "Approved", (v) => v.status === "Approved"],
+];
+const versionOf = (v) => 1 + (String(v.history || "").match(/New version submitted/g) || []).length;
+
+function queueRow(v) {
+  const t = thumbUrl(v.videoUrl);
+  const d = daysSince(v.submitted);
+  const ver = versionOf(v);
+  const waitingCls = v.status === "Approved" || v.status === "Needs Resubmission" ? "muted" : d >= 3 ? "late" : "muted";
+  const when = v.status === "Approved" ? `Approved ${esc(dayLabel(v.reviewed))}${v.reviewedBy ? ` by ${esc(v.reviewedBy)}` : ""}`
+    : v.status === "Needs Resubmission" ? `Sent back ${esc(dayLabel(v.reviewed))}${v.reviewedBy ? ` by ${esc(v.reviewedBy)}` : ""}`
+    : `<span class="${waitingCls}">Waiting ${esc(ageLabel(v.submitted))}</span>`;
+  return `<a class="vrow" href="#/review/${esc(v.id)}">
+    ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
+    <div class="vinfo"><div class="vt">${esc(v.title || "(untitled)")}</div><div class="small muted">${esc(v.editor)} · submitted ${esc(dayLabel(v.submitted))}${ver > 1 ? ` · version ${ver}` : ""}</div><div class="badges m">${statusBadge(v.status)}</div></div>
+    <div class="badges d">${statusBadge(v.status)}</div>
+    <div class="small" style="min-width:120px;text-align:right">${when}</div>
+  </a>`;
+}
+
+function renderQueue() {
+  const q = state.queue || [];
+  const tab = RTABS.find((x) => x[0] === state.rtab) || RTABS[0];
+  let list = q.filter(tab[2]);
+  if (tab[0] !== "todo") list = list.slice().sort((a, b) => (b.reviewed || "").localeCompare(a.reviewed || ""));
+  app.innerHTML = shell("review", `
+    <div class="hero">
+      <div>
+        <div class="eyebrow">Review · team only</div>
+        <h1 class="head">Review</h1>
+        <p>Oldest first. Approving sends the video to the Publishing table; requesting changes sends your notes to the editor.</p>
+      </div>
+      <button class="btn ghost" data-act="reloadQueue">Refresh</button>
+    </div>
+    <section class="card" aria-label="Videos">
+      <div class="card-head" style="margin-bottom:10px">
+        <h2>Videos</h2>
+        <div class="chips" role="group" aria-label="Show">
+          ${RTABS.map((x) => `<button class="chip-btn ${state.rtab === x[0] ? "on" : ""}" data-act="rtab" data-v="${x[0]}" aria-pressed="${state.rtab === x[0]}">${x[1]}<span>${q.filter(x[2]).length}</span></button>`).join("")}
+        </div>
+      </div>
+      ${list.length ? list.map(queueRow).join("") : `<div class="empty">${tab[0] === "todo" ? "Nothing waiting for review." : tab[0] === "waiting" ? "No videos are waiting on an editor." : "Nothing approved in the last two weeks."}</div>`}
+      ${tab[0] === "done" ? `<p class="small muted" style="margin:14px 0 0">Shows the last two weeks.</p>` : ""}
+    </section>`);
+}
+
+function draftFor(id) {
+  if (!state.drafts[id]) state.drafts[id] = { notes: [], overall: "" };
+  return state.drafts[id];
+}
+
+function notesText(d) {
+  const lines = d.notes.map((n) => `${n.time} – ${n.text}`);
+  return [d.overall.trim(), lines.join("\n")].filter(Boolean).join("\n\n");
+}
+
+function historyHtml(v) {
+  const entries = String(v.history || "").split(/\n\s*\n/).map((e) => e.trim()).filter(Boolean);
+  if (!entries.length) return "";
+  return `<section class="card" aria-label="History" style="display:flex;flex-direction:column;gap:12px">
+    <h2 style="font-size:18px">History</h2>
+    ${entries.map((e) => { const [head0, ...rest] = e.split("\n"); const head = head0.replace(/^(\d{4}-\d{2}-\d{2})/, (d) => dayLabel(d)); return `<div class="hist"><div class="small" style="font-weight:700">${esc(head)}</div>${rest.length ? `<div class="pre small" style="margin-top:4px">${esc(rest.join("\n"))}</div>` : ""}</div>`; }).join("")}
+  </section>`;
+}
+
+function noteList(d) {
+  if (!d.notes.length) return `<p class="small muted" style="margin:0">No notes yet. Pause the video where something needs fixing and add a note.</p>`;
+  return `<ul class="notes">${d.notes.map((n, i) => `<li>
+    <button class="tchip" data-act="seek" data-t="${seconds(n.time) ?? 0}" aria-label="Jump to ${esc(n.time)}">${esc(n.time)}</button>
+    <span class="ntext">${esc(n.text)}</span>
+    <button class="nx" data-act="delNote" data-i="${i}" aria-label="Remove note">×</button>
+  </li>`).join("")}</ul>`;
+}
+
+function renderReview(id) {
+  const v = (state.queue || []).find((x) => x.id === id);
+  if (!v) { app.innerHTML = shell("review", `<a class="back" href="#/review">${ARROW} Back to review</a><div class="empty">That video isn't in the review list any more.</div>`); return; }
+  const d = draftFor(id);
+  const ver = versionOf(v);
+  const poster = thumbUrl(v.videoUrl, 540, 960);
+  const approved = v.status === "Approved";
+  const capLen = (v.caption || "").length;
+  const decision = approved ? `<section class="card" aria-label="Approved" style="box-shadow:inset 0 0 0 1px rgba(99,217,154,0.6)">
+      <h2 style="font-size:18px;color:var(--green)">Approved</h2>
+      <p style="margin:8px 0 0;color:#E3EAE8">Approved ${esc(dayLabel(v.reviewed))}${v.reviewedBy ? ` by ${esc(v.reviewedBy)}` : ""}. It's in the Publishing table. To undo it, change the status in Airtable.</p>
+      ${v.feedback ? `<div class="quote" style="margin-top:14px"><b style="color:var(--green)">Note to the editor</b>${esc(v.feedback)}</div>` : ""}
+    </section>` : `<section class="card" aria-label="Your review" style="display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="font-size:18px">Your review</h2>${v.status === "Needs Resubmission" ? `<span class="small muted">Sent back ${esc(dayLabel(v.reviewed))}. You can still change the decision.</span>` : ""}</div>
+      <div>
+        <div class="kv">Notes on the video</div>
+        <div id="noteList">${noteList(d)}</div>
+        <div class="addnote">
+          <label class="sr" for="nTime">Time in the video</label>
+          <input class="input ntime" id="nTime" value="0:00" inputmode="numeric" aria-label="Time in the video">
+          <label class="sr" for="nText">Note</label>
+          <input class="input" id="nText" placeholder="What needs changing at this moment?" aria-label="Note">
+          <button class="btn ghost" data-act="addNote">Add note</button>
+        </div>
+        <span class="hint">The time fills in from where you paused the video.</span>
+      </div>
+      <div class="field"><label for="overall">Overall note</label><textarea class="input" id="overall" rows="3" placeholder="Anything that applies to the whole video">${esc(d.overall)}</textarea></div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+        <button class="btn fixbtn" data-act="decide" data-v="changes" data-id="${esc(v.id)}">Request changes</button>
+        <button class="btn" data-act="decide" data-v="approve" data-id="${esc(v.id)}">Approve</button>
+      </div>
+      <div class="error hidden" id="rvError" role="alert"></div>
+      <p class="small muted" style="margin:0">Requesting changes sends your notes to ${esc(v.editor.split(" ")[0])} in the portal. Approving moves the video to the Publishing table; notes go along as a note to the editor.</p>
+    </section>`;
+  app.innerHTML = shell("review", `
+    <div style="display:flex;flex-direction:column;gap:10px" class="vhead">
+      <a class="back" href="#/review">${ARROW} Back to review</a>
+      <div class="line"><h1 class="head">${esc(v.title || "(untitled)")}</h1>${statusBadge(v.status)}</div>
+      <div class="small muted">${esc(v.editor)} · submitted ${esc(dayLabel(v.submitted))} · version ${ver}</div>
+    </div>
+    <div class="row">
+      <div class="player">
+        ${v.videoUrl ? `<video id="rvVideo" controls playsinline preload="metadata" src="${esc(v.videoUrl)}" ${poster ? `poster="${esc(poster)}"` : ""}></video>` : `<div class="ph">No video file on this one.</div>`}
+        ${v.videoUrl ? `<a class="small" href="${esc(v.videoUrl)}" target="_blank" rel="noopener">Open the file in a new tab</a>` : ""}
+      </div>
+      <div class="grow" style="display:flex;flex-direction:column;gap:20px;flex-basis:480px">
+        ${decision}
+        <section class="card" aria-label="What the editor sent" style="display:flex;flex-direction:column;gap:16px">
+          <h2 style="font-size:18px">What ${esc(v.editor.split(" ")[0])} sent</h2>
+          <div><div class="kv">Caption · ${capLen.toLocaleString("en-US")} characters</div><div class="pre">${v.caption ? esc(v.caption) : `<span class="error">No caption</span>`}</div></div>
+          <div><div class="kv">Music</div>${v.music ? `<a href="${esc(v.music)}" target="_blank" rel="noopener">${esc(v.music.replace(/^https?:\/\//, "").slice(0, 70))}</a>` : `<span class="error">No music link</span>`}</div>
+        </section>
+        ${historyHtml(v)}
+      </div>
+    </div>`);
+  const vid = document.getElementById("rvVideo");
+  const tIn = document.getElementById("nTime");
+  if (vid && tIn) {
+    const sync = () => { if (document.activeElement !== tIn) tIn.value = clock(vid.currentTime); };
+    vid.addEventListener("pause", sync);
+    vid.addEventListener("seeked", sync);
+    vid.addEventListener("timeupdate", () => { if (vid.paused) sync(); });
+  }
+}
+
+function addNote() {
+  const id = location.hash.slice(9);
+  const d = draftFor(id);
+  const tIn = document.getElementById("nTime"), xIn = document.getElementById("nText");
+  const text = xIn.value.trim();
+  if (!text) { xIn.focus(); return; }
+  const sec = seconds(tIn.value);
+  d.notes.push({ time: sec === null ? tIn.value.trim() || "0:00" : clock(sec), text });
+  d.notes.sort((a, b) => (seconds(a.time) ?? 0) - (seconds(b.time) ?? 0));
+  xIn.value = "";
+  document.getElementById("rvError")?.classList.add("hidden");
+  document.getElementById("noteList").innerHTML = noteList(d);
+  xIn.focus();
 }
 
 /* ---------- events ---------- */
@@ -763,6 +972,11 @@ app.addEventListener("submit", async (e) => {
 
 app.addEventListener("input", (e) => {
   if (e.target.id === "caption") document.getElementById("capCount").textContent = `${e.target.value.length} / 2,200 characters`;
+  if (e.target.id === "overall") draftFor(location.hash.slice(9)).overall = e.target.value;
+});
+
+app.addEventListener("keydown", (e) => {
+  if (e.target.id === "nText" && e.key === "Enter") { e.preventDefault(); addNote(); }
 });
 
 app.addEventListener("change", (e) => {
@@ -788,6 +1002,47 @@ app.addEventListener("click", async (e) => {
     store.token = null; state.data = null; go("#/login");
   }
   if (act === "retry") render();
+  if (act === "rtab") { state.rtab = el.dataset.v; renderQueue(); }
+  if (act === "reloadQueue") {
+    el.disabled = true;
+    try { await ensureQueue(true); renderQueue(); } catch (x) { toast(x.message); el.disabled = false; }
+  }
+  if (act === "addNote") addNote();
+  if (act === "delNote") {
+    const d = draftFor(location.hash.slice(9));
+    d.notes.splice(Number(el.dataset.i), 1);
+    document.getElementById("noteList").innerHTML = noteList(d);
+  }
+  if (act === "seek") {
+    const vid = document.getElementById("rvVideo");
+    if (vid) { vid.currentTime = Number(el.dataset.t) || 0; vid.focus(); }
+  }
+  if (act === "decide") {
+    const id = el.dataset.id, decision = el.dataset.v;
+    const d = draftFor(id);
+    const pending = document.getElementById("nText")?.value.trim();
+    if (pending) addNote();
+    const notes = notesText(d);
+    const err = document.getElementById("rvError");
+    err.classList.add("hidden");
+    if (decision === "changes" && !notes) { err.textContent = "Add at least one note, so the editor knows what to fix."; err.classList.remove("hidden"); return; }
+    const label = el.textContent;
+    app.querySelectorAll('[data-act="decide"]').forEach((b) => { b.disabled = true; });
+    el.textContent = decision === "approve" ? "Approving…" : "Sending…";
+    try {
+      await api("review", { id, decision, notes });
+      delete state.drafts[id];
+      await ensureQueue(true);
+      if (isEditor()) state.data = null;
+      const next = state.queue.find((x) => (x.status === "Submitted" || x.status === "In Review") && x.id !== id);
+      toast(decision === "approve" ? "Approved. It's in the Publishing table." : "Changes requested. The editor sees your notes in the portal.");
+      go(next ? `#/review/${next.id}` : "#/review");
+    } catch (x) {
+      err.textContent = x.message; err.classList.remove("hidden");
+      app.querySelectorAll('[data-act="decide"]').forEach((b) => { b.disabled = false; });
+      el.textContent = label;
+    }
+  }
   if (act === "resend") {
     try { await api("request-code", { email: store.email }); toast("New code sent."); } catch (x) { toast(x.message); }
   }
@@ -806,11 +1061,15 @@ app.addEventListener("click", async (e) => {
     err.classList.add("hidden");
     const title = document.getElementById("title").value.trim();
     const fail = (m) => { err.textContent = m; err.classList.remove("hidden"); };
+    const caption = document.getElementById("caption").value.trim();
+    const music = document.getElementById("music").value.trim();
     if (!state.upload) return fail("Upload the video file first.");
-    if (!title) return fail("Give the video a title.");
+    if (!title) { document.getElementById("title").focus(); return fail("Give the video a title."); }
+    if (!caption) { document.getElementById("caption").focus(); return fail("Add the caption."); }
+    if (!MUSIC_URL.test(music)) { document.getElementById("music").focus(); return fail("Paste the Artlist link of the track you used."); }
     el.disabled = true; el.textContent = "Submitting…";
     try {
-      await api("submit", { title, videoUrl: state.upload.url, caption: document.getElementById("caption").value, music: document.getElementById("music").value.trim() });
+      await api("submit", { title, videoUrl: state.upload.url, caption, music });
       state.upload = null;
       await ensureData(true);
       go("#/"); toast("Submitted. It's in your list.");
@@ -820,9 +1079,14 @@ app.addEventListener("click", async (e) => {
     const err = document.getElementById("reError");
     err.classList.add("hidden");
     if (!state.reupload) return;
+    const caption = document.getElementById("reCaption").value.trim();
+    const music = document.getElementById("reMusic").value.trim();
+    const fail = (m) => { err.textContent = m; err.classList.remove("hidden"); };
+    if (!caption) return fail("Add the caption.");
+    if (!MUSIC_URL.test(music)) return fail("Paste the Artlist link of the track you used.");
     el.disabled = true; el.textContent = "Sending…";
     try {
-      await api("resubmit", { id: el.dataset.id, videoUrl: state.reupload.url, caption: document.getElementById("reCaption").value, music: document.getElementById("reMusic").value.trim() });
+      await api("resubmit", { id: el.dataset.id, videoUrl: state.reupload.url, caption, music });
       state.reupload = null;
       await ensureData(true);
       render(); toast("New version sent. It's back in review.");
@@ -843,10 +1107,26 @@ function mockApi(action, payload) {
       if (w === 1 && i === 2) { status = "Needs Resubmission"; feedback = "Music sits too loud under the crowd. Bring it down and open on the take-off, not the walk to the edge."; }
       vids.push({ id: "recSample" + String(n++).padStart(8, "0"), title: `Batch ${14 - w} - Reel ${i + 1} - ${topics[(w * 3 + i) % topics.length]}`, status, submitted: d, reviewed: "", videoUrl: "", caption: "Sample caption.", music: "", feedback, amount: 8, paid: w >= 3, publishAt: "", posted: false });
     } });
-    window.__mock = { editor: { name: "Sample Editor", firstName: "Sample", email: "editor@example.com", rate: 8, payModel: "Per Video" }, videos: vids.sort((a, b) => b.submitted.localeCompare(a.submitted)) };
+    const role = new URLSearchParams(location.search).get("role");
+    window.__mock = {
+      editor: role === "reviewer" ? null : { name: "Sample Editor", firstName: "Sample", email: "editor@example.com", rate: 8, payModel: "Per Video" },
+      reviewer: role === "editor" ? null : { name: "Sample Reviewer", firstName: "Sample", email: "reviewer@example.com" },
+      videos: vids.sort((a, b) => b.submitted.localeCompare(a.submitted)),
+    };
+    const eds = ["Ralph Hepollo", "Mark Espejo", "Rian Magtaan"];
+    window.__mockQueue = vids.slice(0, 14).map((v, i) => ({ ...v, id: "recQueue" + String(i).padStart(9, "0"), editor: eds[i % 3],
+      status: i < 6 ? (i === 1 ? "In Review" : "Submitted") : i < 8 ? "Needs Resubmission" : "Approved",
+      reviewed: i >= 6 ? iso(addDays(new Date(), -(i - 5))) : "", reviewedBy: i >= 6 ? "Carlo" : "",
+      caption: i === 3 ? "" : "27 metres up, three seconds down, and a podium waiting at the bottom. Men's final at Area 47, Tyrol.",
+      music: i === 4 ? "" : "https://artlist.io/royalty-free-music/song/sample/12345",
+      feedback: i === 6 ? "0:03 – Open on the take-off.\n0:11 – Music too loud under the crowd." : "",
+      history: i === 2 ? `${iso(new Date())} · Editor · New version submitted\n\n${iso(addDays(new Date(), -2))} · Leo · Changes requested\n0:05 – Cut the walk to the edge.` : i === 6 ? `${iso(addDays(new Date(), -1))} · Carlo · Changes requested\n0:03 – Open on the take-off.\n0:11 – Music too loud under the crowd.` : "" }))
+      .sort((a, b) => a.submitted.localeCompare(b.submitted));
   }
   return wait(200).then(() => {
     if (action === "dashboard") return JSON.parse(JSON.stringify(window.__mock));
+    if (action === "review-queue") return { reviewer: window.__mock.reviewer, videos: JSON.parse(JSON.stringify(window.__mockQueue)) };
+    if (action === "review") { const v = window.__mockQueue.find((x) => x.id === payload.id); Object.assign(v, { status: payload.decision === "approve" ? "Approved" : "Needs Resubmission", feedback: payload.notes, reviewed: iso(new Date()), reviewedBy: "Sample Reviewer", history: `${iso(new Date())} · Sample Reviewer · ${payload.decision === "approve" ? "Approved" : "Changes requested"}${payload.notes ? "\n" + payload.notes : ""}${v.history ? "\n\n" + v.history : ""}` }); return { ok: true }; }
     if (action === "submit") { window.__mock.videos.unshift({ id: "recSampleNew" + Date.now(), title: payload.title, status: "Submitted", submitted: iso(new Date()), videoUrl: "", caption: payload.caption, music: payload.music, feedback: "", amount: 8, paid: false }); return { ok: true }; }
     if (action === "resubmit") { const v = window.__mock.videos.find((x) => x.id === payload.id); Object.assign(v, { status: "Submitted", feedback: "", caption: payload.caption }); return { ok: true }; }
     return { ok: true };
