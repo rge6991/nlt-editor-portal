@@ -132,6 +132,7 @@
   .ptable .fill { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.38); }
   .ptable .fill.cur { background: var(--orange); }
   .zero { color: rgba(255,255,255,0.32); }
+  .pending { color: rgba(255,255,255,0.45); font-weight: 400; }
   .owe { color: var(--orange); font-weight: 700; }
 
   .attn { box-shadow: inset 0 0 0 1px rgba(255,159,128,0.5); }
@@ -323,6 +324,9 @@ function daysSince(s) {
 const ageLabel = (s) => { const d = daysSince(s); return d === 0 ? "Today" : d === 1 ? "1 day" : `${d} days`; };
 const MUSIC_URL = /^https?:\/\/\S+\.\S+/i;
 const isEditor = () => !!state.data?.editor;
+// Only approved videos are paid. Before approval, show what the video will earn.
+const expected = (v) => v.status === "Approved" || v.amount ? v.amount : (state.data?.editor?.payModel === "Per Hour" ? 0 : Number(state.data?.editor?.rate) || 0);
+const amountCell = (v) => v.status === "Approved" || v.amount ? money(v.amount) : `<span class="pending" title="Paid once approved">${money(expected(v))}</span>`;
 const isReviewer = () => !!state.data?.reviewer;
 
 function toast(msg) {
@@ -447,7 +451,7 @@ const STATUS = {
   "Needs Resubmission": ["Needs changes", "b-fix"],
 };
 const statusBadge = (s) => { const [l, c] = STATUS[s] || [s, "b-sub"]; return `<span class="badge ${c}">${esc(l)}</span>`; };
-const payBadge = (v) => v.paid ? `<span class="badge b-paid">Paid</span>` : `<span class="badge b-unpaid">Not yet paid</span>`;
+const payBadge = (v) => v.paid ? `<span class="badge b-paid">Paid</span>` : v.status === "Approved" || v.amount ? `<span class="badge b-unpaid">Not yet paid</span>` : "";
 
 /* ---------- login ---------- */
 function loginFrame(inner) {
@@ -537,7 +541,7 @@ function periodRows(videos) {
 
 const FILTERS = [
   ["all", "All", () => true],
-  ["unpaid", "Not yet paid", (v) => !v.paid],
+  ["unpaid", "Not yet paid", (v) => !v.paid && v.status === "Approved"],
   ["paid", "Paid", (v) => v.paid],
   ["changes", "Needs changes", (v) => v.status === "Needs Resubmission"],
 ];
@@ -548,7 +552,7 @@ function videoRow(v) {
     ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
     <div class="vinfo"><div class="vt">${esc(v.title || "(untitled)")}</div><div class="small muted">Submitted ${esc(dayLabel(v.submitted))}</div><div class="badges m">${statusBadge(v.status)}${payBadge(v)}</div></div>
     <div class="badges d">${statusBadge(v.status)}${payBadge(v)}</div>
-    <div class="amt">${money(v.amount)}</div>
+    <div class="amt">${amountCell(v)}</div>
   </a>`;
 }
 
@@ -564,10 +568,11 @@ function renderDashboard() {
   const changes = videos.filter((v) => v.status === "Needs Resubmission");
   const changesUnpaid = unpaid.filter((v) => v.status === "Needs Resubmission");
   const total = Math.max(1, unpaid.length);
+  const sumExpected = (list) => Math.round(list.reduce((t, v) => t + (Number(expected(v)) || 0), 0) * 100) / 100;
   const f = FILTERS.find((x) => x[0] === state.filter) || FILTERS[0];
   const list = videos.filter(f[2]);
   const ws = weekStart(today);
-  const rateLine = editor.payModel === "Per Hour" ? `${money(editor.rate)} per hour` : `${money(editor.rate)} per video`;
+  const rateLine = editor.payModel === "Per Hour" ? `${money(editor.rate)} per hour` : `${money(editor.rate)} per approved video`;
   const rateNote = editor.payModel === "Per Hour" ? "" : ", including one round of feedback and the caption";
 
   app.innerHTML = shell("dash", `
@@ -584,7 +589,7 @@ function renderDashboard() {
       <div class="tile"><div class="lbl">This week</div><div class="num">${thisWeek.length}</div><div class="sub">${thisWeek.length === 1 ? "video" : "videos"} · ${fmtRange(ws, addDays(ws, 6))}</div></div>
       <div class="tile"><div class="lbl">This month</div><div class="num">${thisMonth.length}</div><div class="sub">${thisMonth.length === 1 ? "video" : "videos"} in ${MONTHS[today.getMonth()]}</div></div>
       <div class="tile paid"><div class="lbl">Paid</div><div class="num">${money(sum(paid))}</div><div class="sub">${plural(paid.length, "video", "videos")}</div></div>
-      <div class="tile owed"><div class="lbl">Not yet paid</div><div class="num">${money(sum(unpaid))}</div><div class="sub">${plural(unpaid.length, "video", "videos")}</div></div>
+      <div class="tile owed"><div class="lbl">Not yet paid</div><div class="num">${money(sum(approved))}</div><div class="sub">${plural(approved.length, "approved video", "approved videos")}</div></div>
     </section>
 
     <div class="row">
@@ -600,7 +605,7 @@ function renderDashboard() {
           <div class="r h"><div>${state.period === "week" ? "Week" : "Month"}</div><div>Videos</div><div>Paid</div><div>Not yet paid</div></div>
           ${periodRows(videos)}
         </div>
-        <p class="small muted" style="margin:14px 0 0">${state.period === "week" ? "Weeks run Monday to Sunday. A video counts in the week you submitted it." : "A video counts in the month you submitted it."}</p>
+        <p class="small muted" style="margin:14px 0 0">${state.period === "week" ? "Weeks run Monday to Sunday. A video counts in the week you submitted it." : "A video counts in the month you submitted it."} Amounts only include approved videos.</p>
       </section>
 
       <div class="side">
@@ -613,7 +618,7 @@ function renderDashboard() {
           </a>`).join("")}
         </section>` : ""}
         <section class="card" aria-label="Not yet paid">
-          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px"><h2 style="font-size:16px">Not yet paid</h2><span class="head" style="font-size:22px;color:var(--orange)">${money(sum(unpaid))}</span></div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px"><h2 style="font-size:16px">Not yet paid</h2><span class="head" style="font-size:22px;color:var(--orange)">${money(sum(approved))}</span></div>
           <div class="split-bar" aria-hidden="true">
             <span style="width:${Math.round((approved.length / total) * 100)}%;background:var(--green)"></span>
             <span style="width:${Math.round((review.length / total) * 100)}%;background:var(--orange)"></span>
@@ -621,10 +626,10 @@ function renderDashboard() {
           </div>
           <div class="legend">
             <div><span class="dot" style="background:var(--green)"></span><span style="flex:1">Approved, waiting for payment</span><span class="muted">${plural(approved.length, "video", "videos")}</span><b style="width:56px;text-align:right">${money(sum(approved))}</b></div>
-            <div><span class="dot" style="background:var(--orange)"></span><span style="flex:1">In review</span><span class="muted">${plural(review.length, "video", "videos")}</span><b style="width:56px;text-align:right">${money(sum(review))}</b></div>
-            <div><span class="dot" style="background:var(--salmon)"></span><span style="flex:1">Needs changes</span><span class="muted">${plural(changesUnpaid.length, "video", "videos")}</span><b style="width:56px;text-align:right">${money(sum(changesUnpaid))}</b></div>
+            <div><span class="dot" style="background:var(--orange)"></span><span style="flex:1">In review</span><span class="muted">${plural(review.length, "video", "videos")}</span><b class="pending" style="width:56px;text-align:right">${money(sumExpected(review))}</b></div>
+            <div><span class="dot" style="background:var(--salmon)"></span><span style="flex:1">Needs changes</span><span class="muted">${plural(changesUnpaid.length, "video", "videos")}</span><b class="pending" style="width:56px;text-align:right">${money(sumExpected(changesUnpaid))}</b></div>
           </div>
-          <p class="small muted" style="margin:16px 0 0">A video moves to Paid when NLT marks it as paid.</p>
+          <p class="small muted" style="margin:16px 0 0">Only approved videos are paid. Grey amounts are what a video earns once it's approved. A video moves to Paid when NLT marks it as paid.</p>
         </section>
       </div>
     </div>
@@ -702,7 +707,7 @@ function renderVideo(id) {
     <div style="display:flex;flex-direction:column;gap:10px" class="vhead">
       <a class="back" href="#/">${ARROW} Back to dashboard</a>
       <div class="line"><h1 class="head">${esc(v.title || "(untitled)")}</h1>${statusBadge(v.status)}${payBadge(v)}</div>
-      <div class="small muted">Submitted ${esc(dayLabel(v.submitted))} · ${money(v.amount)}</div>
+      <div class="small muted">Submitted ${esc(dayLabel(v.submitted))} · ${v.status === "Approved" || v.amount ? money(v.amount) : `${money(expected(v))} once approved`}</div>
     </div>
     ${steps(v)}
     <div class="row">
@@ -1105,7 +1110,7 @@ function mockApi(action, payload) {
       let status = "Approved", feedback = "";
       if (w === 0) status = i === 0 ? "In Review" : "Submitted";
       if (w === 1 && i === 2) { status = "Needs Resubmission"; feedback = "Music sits too loud under the crowd. Bring it down and open on the take-off, not the walk to the edge."; }
-      vids.push({ id: "recSample" + String(n++).padStart(8, "0"), title: `Batch ${14 - w} - Reel ${i + 1} - ${topics[(w * 3 + i) % topics.length]}`, status, submitted: d, reviewed: "", videoUrl: "", caption: "Sample caption.", music: "", feedback, amount: 8, paid: w >= 3, publishAt: "", posted: false });
+      vids.push({ id: "recSample" + String(n++).padStart(8, "0"), title: `Batch ${14 - w} - Reel ${i + 1} - ${topics[(w * 3 + i) % topics.length]}`, status, submitted: d, reviewed: "", videoUrl: "", caption: "Sample caption.", music: "", feedback, amount: status === "Approved" ? 8 : 0, paid: w >= 3, publishAt: "", posted: false });
     } });
     const role = new URLSearchParams(location.search).get("role");
     window.__mock = {
