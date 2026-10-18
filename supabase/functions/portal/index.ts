@@ -15,6 +15,9 @@ const T_EDITORS = "tbla4YKeVLmMN8Ay6";
 const T_VIDEOS = "tblZm9wz5Truwc9au";
 const T_REVIEWERS = "tblqHqYCyBNKqq88k";
 const T_PAYOUTS = "tblU046MpsrNhN1Sd";
+// Caption Examples: rows with "Use in checker" ticked are the examples the caption check judges against.
+const T_CAPTIONS = "tbllar9yr94bmdzi4";
+const CX = { caption: "fldNGy7VRCQ1XFR6M", why: "fldN5j0BDHvDxiWTW", use: "fldGm9qF4fxHHgapU" };
 // Paydays are every second Friday from this date. Keep in step with PAY_ANCHOR in the Airtable "Pay run" script.
 const PAY_ANCHOR = "2026-10-23";
 
@@ -68,32 +71,21 @@ const MUSIC_URL = /^https?:\/\/\S+\.\S+/i;
 
 const CLAUDE_MODEL = "claude-haiku-5-5";
 const CHECKS_PER_HOUR = 30;
-const CAPTION_VOICE = `You check social media captions for No Limits Tour (NLT), the professional cliff diving world tour. A video editor wrote the caption below. Point out spelling, grammar and punctuation mistakes, and say briefly where the caption drifts from NLT's voice.
+const VOICE_RULES = `You check social media captions for No Limits Tour (NLT), the professional cliff diving world tour. A video editor wrote the caption below. Point out spelling, grammar and punctuation mistakes, and say briefly where the caption drifts from NLT's voice.
 
 Never write a new caption and never rewrite whole sentences. The caption stays the editor's own work; you only point things out.
 
 NLT's voice for captions:
 - Short and punchy: one or two short lines. Let the dive speak.
-- Direct, confident and warm. Playful humour is welcome.
+- Direct, confident and warm. Playful humor is welcome.
 - Often ends with a short question to the viewer, to get comments.
 - One or two emoji at the end of a line, not more.
-- British English spelling.
+- American English spelling (color, favorite, center).
 - No em dashes.
 - No generic sport-marketing words such as unleash, ignite, elevate or epic journey.
 - No block of hashtags. A few relevant hashtags at the very end are fine.
-- Cliff diving is a professional sport: never call it a stunt, a show or a trick.
-
-Captions NLT has published:
-- The calm before the chaos. 👀 / What would be going through your mind up there?
-- \u201cI don\u2019t think I\u2019m ready yet.\u201d Famous last words. 😂🔥
-- Six divers. Six different ways to defy gravity. ⚡️ / Which jump caught your eye? 👀
-- When the air becomes your dance floor. 🪽 / Would you call this art or adrenaline? 👇
-- Be honest\u2026 how many spins did you count? 🌀👇
-- Different style. Same love for the air. Which is yours?
-- Hard work paid off. 🏆
-- Oui oui\u2026 straight to the water. 😂
-
-How to answer:
+- Cliff diving is a professional sport: never call it a stunt, a show or a trick.`;
+const VOICE_ANSWER = `How to answer:
 - spelling: only real mistakes. "wrong" is copied exactly from the caption, a few words long, and "right" is the corrected version of that same snippet. Leave names, emoji, hashtags, deliberate slang and style choices alone.
 - tone: at most three notes, one short sentence each, in plain English. Each note names the part of the caption it is about and says what to change. Leave it empty when the caption fits the voice.
 - verdict: "ready" when nothing important needs changing, "small fixes" for spelling or small tone points, "needs work" when the caption clearly misses the voice or is hard to understand.`;
@@ -643,6 +635,32 @@ async function review(req: Request, body: Record<string, unknown>) {
 
 // ---------- caption check ----------
 
+let exampleCache: { at: number; list: { caption: string; why: string }[] } | null = null;
+async function captionExamples() {
+  if (exampleCache && Date.now() - exampleCache.at < 10 * 60 * 1000) return exampleCache.list;
+  try {
+    const fields = [CX.caption, CX.why].map((f) => `fields[]=${f}`).join("&");
+    const formula = encodeURIComponent(`{Use in checker}`);
+    const data = await airtable(`${T_CAPTIONS}?filterByFormula=${formula}&${fields}&returnFieldsByFieldId=true&pageSize=100`);
+    const list = (data.records ?? [])
+      .map((r: { fields: Record<string, unknown> }) => ({ caption: String(r.fields?.[CX.caption] ?? "").trim(), why: String(r.fields?.[CX.why] ?? "").trim() }))
+      .filter((x: { caption: string }) => x.caption)
+      .slice(0, 40);
+    exampleCache = { at: Date.now(), list };
+    return list;
+  } catch (e) {
+    console.error("caption examples", e);
+    return exampleCache?.list ?? [];
+  }
+}
+
+function captionSystem(examples: { caption: string; why: string }[]) {
+  const ex = examples.length
+    ? "Captions NLT likes (from our examples list in Airtable):\n" + examples.map((x) => `- ${x.caption.replace(/\s*\n+\s*/g, " / ")}${x.why ? ` (why it works: ${x.why})` : ""}`).join("\n") + "\n\n"
+    : "";
+  return `${VOICE_RULES}\n\n${ex}${VOICE_ANSWER}`;
+}
+
 async function checkCaption(req: Request, body: Record<string, unknown>) {
   const s = await sessionFrom(req);
   const caption = clip(body.caption, 2200);
@@ -668,7 +686,7 @@ async function checkCaption(req: Request, body: Record<string, unknown>) {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 2000,
-        system: CAPTION_VOICE,
+        system: captionSystem(await captionExamples()),
         messages: [{ role: "user", content: `Caption to check:\n\n${caption}` }],
         output_config: { format: { type: "json_schema", schema: CHECK_SCHEMA } },
       }),

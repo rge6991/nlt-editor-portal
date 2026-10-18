@@ -850,7 +850,7 @@ function renderVideo(id) {
       <h2 style="font-size:18px;margin-bottom:16px">Upload a new version</h2>
       <div style="display:flex;flex-direction:column;gap:16px">
         <div id="reDrop">${dropzone("reFile")}</div>
-        <div class="field"><label for="reCaption">Caption <span class="req">Required</span></label><textarea class="input" id="reCaption" rows="4" required spellcheck="true" lang="en-GB">${esc(v.caption)}</textarea><div class="check-row"><span></span><button type="button" class="btn ghost" data-act="checkCaption" data-for="reCaption">Check spelling and tone</button></div><div id="reCaptionCheck"></div></div>
+        <div class="field"><label for="reCaption">Caption <span class="req">Required</span></label><textarea class="input" id="reCaption" rows="4" required spellcheck="true" lang="en-US">${esc(v.caption)}</textarea><div class="check-row"><span></span><button type="button" class="btn ghost" data-act="checkCaption" data-for="reCaption">Check spelling and tone</button></div><div id="reCaptionCheck"></div></div>
         <div class="field"><label for="reMusic">Music <span class="req">Required</span></label><input class="input" id="reMusic" type="url" required placeholder="https://artlist.io/..." value="${esc(v.music)}"><span class="hint">Paste the Artlist link of the track you used.</span></div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
           <button class="btn" data-act="resubmit" data-id="${esc(v.id)}" id="reBtn" disabled>Submit new version</button>
@@ -934,7 +934,7 @@ function renderSubmit() {
       <div class="field"><label for="title">Title <span class="req">Required</span></label><input class="input" id="title" type="text" maxlength="200" required placeholder="e.g. Batch 5 - Reel 3 - Podium Celebration"></div>
       <div class="field">
         <label for="caption">Caption <span class="req">Required</span></label>
-        <textarea class="input" id="caption" rows="5" maxlength="2200" required spellcheck="true" lang="en-GB" placeholder="The caption that goes out with the post"></textarea>
+        <textarea class="input" id="caption" rows="5" maxlength="2200" required spellcheck="true" lang="en-US" placeholder="The caption that goes out with the post"></textarea>
         <div class="check-row"><span class="hint" id="capCount">0 / 2,200 characters</span><button type="button" class="btn ghost" data-act="checkCaption" data-for="caption">Check spelling and tone</button></div>
         <div id="captionCheck"></div>
       </div>
