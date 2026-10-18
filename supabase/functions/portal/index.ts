@@ -1,8 +1,10 @@
 // NLT editor portal backend.
 // The browser never sees an Airtable key: every read and write goes through here.
 // Login: email -> 6-digit code by email -> session token (30 days).
-// Each editor only ever gets their own videos, and never any bank or payment-method fields.
+// Each editor only ever gets their own videos and payouts, and never any bank or payment-method fields.
 // Reviewers (Reviewers table, Active ticked) get the review queue and can approve or request changes.
+// Payouts: every second Friday the Airtable "Pay run" automation creates one Payouts row per editor
+// (USD total, USD→PHP rate, pesos sent). Editors see them on the Payments page.
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import nodemailer from "npm:nodemailer@6.9.16";
@@ -11,6 +13,9 @@ const AIRTABLE = "https://api.airtable.com/v0/app9LXJtFUqO3VN0V";
 const T_EDITORS = "tbla4YKeVLmMN8Ay6";
 const T_VIDEOS = "tblZm9wz5Truwc9au";
 const T_REVIEWERS = "tblqHqYCyBNKqq88k";
+const T_PAYOUTS = "tblU046MpsrNhN1Sd";
+// Paydays are every second Friday from this date. Keep in step with PAY_ANCHOR in the Airtable "Pay run" script.
+const PAY_ANCHOR = "2026-10-23";
 
 // Airtable field IDs (stable even if a field is renamed).
 const E = {
@@ -20,6 +25,21 @@ const E = {
   rate: "fldBraYbnmNkX6dGm",
   payModel: "fldHvik5ne9dCqDuH",
   videos: "fld1fG1EktpR6rVz3",
+  payouts: "fldSlw6Wevg9MMmYx",
+};
+// Payouts table. Only these fields ever leave Airtable (no bank details live here anyway).
+const P = {
+  payDate: "fld9c9NgdPutRxxxk",
+  status: "fldzl4D2Ju0heP3U6",
+  videos: "fld12Eq93AhPt1qet",
+  usd: "fldj7jQ7r0j5g0FdH",
+  rate: "fld6SRXDn6Sk1C8g2",
+  rateSource: "fldPce5AKeGFQaqx6",
+  php: "fldyF5aAJNNmrpChs",
+  paidTo: "fldL1lrgmJjN5WIuF",
+  paidOn: "fldHKfgVv3HsXAtzC",
+  receipt: "fldgbqJiCPwxcSFMQ",
+  note: "fldVm3tU1Kv2GHef5",
 };
 const V = {
   title: "fldEyhvtnSXTmjedf",
@@ -152,7 +172,7 @@ async function findEditorByEmail(email: string) {
 }
 
 async function getEditor(id: string) {
-  const fields = [E.name, E.email, E.status, E.rate, E.payModel, E.videos].map((f) => `fields[]=${f}`).join("&");
+  const fields = [E.name, E.email, E.status, E.rate, E.payModel, E.videos, E.payouts].map((f) => `fields[]=${f}`).join("&");
   // Single-record GET doesn't take fields[]; use a filtered list instead so bank fields never leave Airtable.
   const formula = encodeURIComponent(`RECORD_ID()="${id}"`);
   const data = await airtable(`${T_EDITORS}?filterByFormula=${formula}&${fields}&returnFieldsByFieldId=true&maxRecords=1`);
@@ -175,6 +195,58 @@ async function getVideos(ids: string[]) {
     } while (offset);
   }
   return out;
+}
+
+// ---------- payouts ----------
+
+async function getPayouts(ids: string[]) {
+  const out: { id: string; fields: Record<string, unknown> }[] = [];
+  const fields = Object.values(P).map((f) => `fields[]=${f}`).join("&");
+  for (let i = 0; i < ids.length; i += 40) {
+    const chunk = ids.slice(i, i + 40);
+    const formula = encodeURIComponent(`OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`);
+    let offset = "";
+    do {
+      const data = await airtable(`${T_PAYOUTS}?filterByFormula=${formula}&${fields}&returnFieldsByFieldId=true&pageSize=100${offset ? `&offset=${offset}` : ""}`);
+      out.push(...(data.records ?? []));
+      offset = data.offset ?? "";
+    } while (offset);
+  }
+  return out;
+}
+
+function num(v: unknown): number | null {
+  const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function shapePayout(rec: { id: string; fields: Record<string, unknown> }) {
+  const f = rec.fields;
+  const receipts = ((f[P.receipt] as { url?: string; filename?: string }[] | undefined) ?? [])
+    .filter((a) => /^https:\/\//.test(String(a.url ?? "")))
+    .map((a) => ({ url: String(a.url), name: String(a.filename ?? "Receipt") }));
+  return {
+    id: rec.id,
+    payDate: String(f[P.payDate] ?? ""),
+    status: selectName(f[P.status]) || "To pay",
+    paidOn: String(f[P.paidOn] ?? ""),
+    usd: num(f[P.usd]) ?? 0,
+    rate: num(f[P.rate]),
+    php: num(f[P.php]),
+    rateSource: String(f[P.rateSource] ?? ""),
+    paidTo: String(f[P.paidTo] ?? ""),
+    note: String(f[P.note] ?? ""),
+    receipts,
+    videoIds: (f[P.videos] as string[] | undefined) ?? [],
+  };
+}
+
+// The next payday on or after today (Vienna), counting every 14 days from PAY_ANCHOR.
+function nextPayday(): string {
+  const day = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86400000;
+  const since = day(viennaToday()) - day(PAY_ANCHOR);
+  const add = since <= 0 ? 0 : Math.ceil(since / 14) * 14;
+  return new Date((day(PAY_ANCHOR) + add) * 86400000).toISOString().slice(0, 10);
 }
 
 // ---------- reviewers ----------
@@ -353,10 +425,18 @@ async function dashboard(req: Request) {
   if (!ed && !reviewer) throw new HttpError(401, "Your session has ended. Log in again.");
   let editor = null;
   let videos: ReturnType<typeof shapeVideo>[] = [];
+  let payouts: ReturnType<typeof shapePayout>[] = [];
   if (ed) {
     const ids = (ed.fields?.[E.videos] as string[] | undefined) ?? [];
-    videos = (await getVideos(ids)).map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }))
+    const payoutIds = (ed.fields?.[E.payouts] as string[] | undefined) ?? [];
+    // A payouts hiccup must never stop editors from seeing and submitting videos.
+    const [vrecs, precs] = await Promise.all([
+      getVideos(ids),
+      getPayouts(payoutIds).catch((e) => { console.error("payouts", e); return []; }),
+    ]);
+    videos = vrecs.map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }))
       .sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
+    payouts = precs.map(shapePayout).sort((a, b) => (b.payDate || "").localeCompare(a.payDate || ""));
     const name = String(ed.fields?.[E.name] ?? "");
     editor = {
       name,
@@ -370,6 +450,8 @@ async function dashboard(req: Request) {
     editor,
     reviewer: reviewer ? { name: reviewer.name, firstName: reviewer.name.split(" ")[0] || reviewer.name, email: s.email } : null,
     videos,
+    payouts,
+    nextPayday: nextPayday(),
   };
 }
 
