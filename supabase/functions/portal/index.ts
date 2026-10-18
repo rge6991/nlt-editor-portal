@@ -77,13 +77,15 @@ Never write a new caption and never rewrite whole sentences. The caption stays t
 
 NLT's voice for captions:
 - Short and punchy: one or two short lines. Let the dive speak.
+- A short tease that the video then pays off works well, for example "Maybe the perfect shot does exist…".
+- When the video is about one athlete, name them or @tag them. Saying where or at which event (for example Area 47) helps people find the post.
 - Direct, confident and warm. Playful humor is welcome.
-- Often ends with a short question to the viewer, to get comments.
+- A question to the viewer is optional. If there is one, it should be specific and easy to answer: a number, or a pick between two things. Point out generic questions such as "Would you jump?"; on NLT's posts they got no answers.
 - One or two emoji at the end of a line, not more.
 - American English spelling (color, favorite, center).
 - No em dashes.
-- No generic sport-marketing words such as unleash, ignite, elevate or epic journey.
-- No block of hashtags. A few relevant hashtags at the very end are fine.
+- No generic sport-marketing words such as unleash, ignite, elevate or epic journey, and no lines that would fit any sports video, such as "hard work paid off".
+- Hashtags are optional: at most five, all at the very end (Instagram allows five).
 - Cliff diving is a professional sport: never call it a stunt, a show or a trick.`;
 const VOICE_ANSWER = `How to answer:
 - spelling: only real mistakes. "wrong" is copied exactly from the caption, a few words long, and "right" is the corrected version of that same snippet. Leave names, emoji, hashtags, deliberate slang and style choices alone.
