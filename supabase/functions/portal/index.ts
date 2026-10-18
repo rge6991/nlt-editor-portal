@@ -429,7 +429,11 @@ async function dashboard(req: Request) {
   if (ed) {
     const ids = (ed.fields?.[E.videos] as string[] | undefined) ?? [];
     const payoutIds = (ed.fields?.[E.payouts] as string[] | undefined) ?? [];
-    const [vrecs, precs] = await Promise.all([getVideos(ids), getPayouts(payoutIds)]);
+    // A payouts hiccup must never stop editors from seeing and submitting videos.
+    const [vrecs, precs] = await Promise.all([
+      getVideos(ids),
+      getPayouts(payoutIds).catch((e) => { console.error("payouts", e); return []; }),
+    ]);
     videos = vrecs.map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }))
       .sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
     payouts = precs.map(shapePayout).sort((a, b) => (b.payDate || "").localeCompare(a.payDate || ""));
