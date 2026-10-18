@@ -165,6 +165,32 @@
   .b-fix { background: rgba(255,159,128,0.18); color: var(--salmon); }
   .b-paid { background: var(--green); color: #00261F; }
   .b-unpaid { box-shadow: inset 0 0 0 1px rgba(240,120,29,0.7); color: var(--orange); }
+  .b-sending { background: rgba(240,120,29,0.2); color: var(--orange-soft); }
+
+  /* Payments */
+  .tile .num.date { font-size: 34px; line-height: 1.5; }
+  .payout { border-top: 1px solid rgba(255,255,255,0.1); }
+  .payout:first-of-type { border-top: none; }
+  .payout summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 16px 0; }
+  .payout summary::-webkit-details-marker { display: none; }
+  .payout .chev { flex: 0 0 auto; color: var(--muted); transition: transform 0.15s; display: flex; }
+  .payout[open] .chev { transform: rotate(90deg); }
+  .payout .pd { flex: 1 1 200px; min-width: 0; }
+  .payout .pd b { display: block; font-size: 16px; }
+  .payout .usd { width: 84px; text-align: right; color: var(--soft); font-variant-numeric: tabular-nums; }
+  .payout .php { min-width: 104px; text-align: right; font-family: 'NLT Headline', sans-serif; font-weight: 700; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .pbody { padding: 0 0 22px 34px; display: flex; flex-direction: column; gap: 16px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px 24px; }
+  .facts .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .vlist .li { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 9px 0; border-top: 1px solid rgba(255,255,255,0.08); color: var(--white); text-decoration: none; font-size: 14px; }
+  .vlist .li:hover span:first-child { text-decoration: underline; text-decoration-color: rgba(255,255,255,0.4); }
+  .vlist .li span:first-child { min-width: 0; overflow-wrap: anywhere; }
+  .vlist .li span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .vlist .li.tot { font-weight: 700; border-top-color: rgba(255,255,255,0.3); }
+  .how { margin: 0; padding: 0; list-style: none; counter-reset: how; display: flex; flex-direction: column; gap: 14px; }
+  .how li { counter-increment: how; display: flex; gap: 12px; color: #E3EAE8; font-size: 14px; }
+  .how li::before { content: counter(how); flex: 0 0 24px; height: 24px; border-radius: 12px; background: rgba(240,120,29,0.2); color: var(--orange-soft); font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .onway { box-shadow: inset 0 0 0 1px rgba(240,120,29,0.6); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
   .amt { width: 64px; text-align: right; font-weight: 700; font-size: 16px; }
   .list-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 14px; color: var(--muted); }
   .empty { padding: 24px 0 8px; color: var(--muted); }
@@ -246,6 +272,12 @@
     .badges.m { display: flex; gap: 6px; }
     .badges.m .badge { font-size: 10px; letter-spacing: 0.03em; padding: 4px 7px; }
     .amt { width: auto; }
+    .payout .usd { width: auto; }
+    .payout .php { min-width: 0; font-size: 20px; }
+    .pbody { padding-left: 0; }
+    .tile .num.date { font-size: 24px; }
+    nav.main { gap: 16px; }
+    .lg { display: none; }
     .who { font-size: 0; gap: 0; }
   }
 
@@ -298,6 +330,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const money = (n) => { const v = Number(n) || 0; return "$" + (Number.isInteger(v) ? v : v.toFixed(2)); };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const sum = (list) => Math.round(list.reduce((t, v) => t + (Number(v.amount) || 0), 0) * 100) / 100;
+const peso = (n) => "₱" + Math.round(Number(n) || 0).toLocaleString("en-US");
+const usd2 = (n) => "$" + (Number(n) || 0).toFixed(2);
 function parseDay(s) { const [y, m, d] = String(s).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); }
 function iso(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
@@ -418,6 +452,7 @@ async function render() {
   if (!isEditor()) { go("#/review"); return; }
   if (h.startsWith("#/video/")) return renderVideo(h.slice(8));
   if (h === "#/submit") return renderSubmit();
+  if (h === "#/payments") return renderPayments();
   return renderDashboard();
 }
 
@@ -435,7 +470,7 @@ function shell(active, inner) {
   <header class="top"><div class="top-in">
     <a class="brand" href="#/" aria-label="No Limits Tour editor portal, home">${LOGO_SVG}<span class="sep"></span><span class="tag">Editor portal</span></a>
     <nav class="main" aria-label="Main">
-      ${isEditor() ? link("dash", "#/", "Dashboard") + link("submit", "#/submit", "Submit a video") : ""}
+      ${isEditor() ? link("dash", "#/", "Dashboard") + link("submit", "#/submit", 'Submit<span class="lg"> a video</span>') + link("pay", "#/payments", "Payments") : ""}
       ${isReviewer() ? link("review", "#/review", "Review", waiting ? ` <span class="count">${waiting}</span>` : "") : ""}
       ${ed ? `<span class="who"><span class="avatar" aria-hidden="true">${esc(initials)}</span>${esc(ed.name)}</span>` : ""}
       <button class="linkbtn" style="color:var(--soft)" data-act="logout">Log out</button>
@@ -451,7 +486,24 @@ const STATUS = {
   "Needs Resubmission": ["Needs changes", "b-fix"],
 };
 const statusBadge = (s) => { const [l, c] = STATUS[s] || [s, "b-sub"]; return `<span class="badge ${c}">${esc(l)}</span>`; };
-const payBadge = (v) => v.paid ? `<span class="badge b-paid">Paid</span>` : v.status === "Approved" || v.amount ? `<span class="badge b-unpaid">Not yet paid</span>` : "";
+const payBadge = (v) => v.paid || payoutOf(v)?.status === "Paid" ? `<span class="badge b-paid">Paid</span>` : payoutOf(v) ?`<span class="badge b-sending">Being paid</span>` : v.status === "Approved" || v.amount ? `<span class="badge b-unpaid">Not yet paid</span>` : "";
+
+/* ---------- payouts ---------- */
+// Which payout a video is in (built once per dashboard load).
+let payoutIndex = { src: null, map: new Map() };
+function payoutOf(v) {
+  if (payoutIndex.src !== state.data) {
+    const map = new Map();
+    (state.data?.payouts || []).forEach((p) => (p.videoIds || []).forEach((id) => map.set(id, p)));
+    payoutIndex = { src: state.data, map };
+  }
+  return payoutIndex.map.get(v.id) || null;
+}
+// A video earns money once it's approved, or when NLT has set a fixed amount for it.
+const earns = (v) => v.status === "Approved" || Number(v.amount) > 0;
+const fmtDate = (s) => { if (!s) return "–"; const d = parseDay(s); return `${DAYS[d.getDay()].slice(0, 3)} ${d.getDate()} ${MON[d.getMonth()]}`; };
+const fmtFull = (s) => { if (!s) return "–"; const d = parseDay(s); return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`; };
+const nextPayday = () => state.data?.nextPayday || "";
 
 /* ---------- login ---------- */
 function loginFrame(inner) {
@@ -541,7 +593,7 @@ function periodRows(videos) {
 
 const FILTERS = [
   ["all", "All", () => true],
-  ["unpaid", "Not yet paid", (v) => !v.paid && v.status === "Approved"],
+  ["unpaid", "Not yet paid", (v) => !v.paid && earns(v)],
   ["paid", "Paid", (v) => v.paid],
   ["changes", "Needs changes", (v) => v.status === "Needs Resubmission"],
 ];
@@ -563,8 +615,8 @@ function renderDashboard() {
   const thisWeek = videos.filter((v) => v.submitted >= wk);
   const thisMonth = videos.filter((v) => (v.submitted || "").slice(0, 7) === mk);
   const paid = videos.filter((v) => v.paid), unpaid = videos.filter((v) => !v.paid);
-  const approved = unpaid.filter((v) => v.status === "Approved");
-  const review = unpaid.filter((v) => v.status === "Submitted" || v.status === "In Review");
+  const approved = unpaid.filter(earns);
+  const review = unpaid.filter((v) => !earns(v) && (v.status === "Submitted" || v.status === "In Review"));
   const changes = videos.filter((v) => v.status === "Needs Resubmission");
   const changesUnpaid = unpaid.filter((v) => v.status === "Needs Resubmission");
   const total = Math.max(1, unpaid.length);
@@ -629,7 +681,8 @@ function renderDashboard() {
             <div><span class="dot" style="background:var(--orange)"></span><span style="flex:1">In review</span><span class="muted">${plural(review.length, "video", "videos")}</span><b class="pending" style="width:56px;text-align:right">${money(sumExpected(review))}</b></div>
             <div><span class="dot" style="background:var(--salmon)"></span><span style="flex:1">Needs changes</span><span class="muted">${plural(changesUnpaid.length, "video", "videos")}</span><b class="pending" style="width:56px;text-align:right">${money(sumExpected(changesUnpaid))}</b></div>
           </div>
-          <p class="small muted" style="margin:16px 0 0">Only approved videos are paid. Grey amounts are what a video earns once it's approved. A video moves to Paid when NLT marks it as paid.</p>
+          <p class="small muted" style="margin:16px 0 0">Only approved videos are paid. Grey amounts are what a video earns once it's approved. Approved videos are paid every second Friday, in pesos.</p>
+          ${nextPayday() ? `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.1)"><span>Next payday <b>${esc(fmtDate(nextPayday()))}</b></span><a href="#/payments" class="small">See your payments</a></div>` : ""}
         </section>
       </div>
     </div>
@@ -646,18 +699,121 @@ function renderDashboard() {
     </section>`);
 }
 
+/* ---------- payments page ---------- */
+const CHEV = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg>`;
+
+function payoutRow(p, byId) {
+  const vids = (p.videoIds || []).map((id) => byId.get(id)).filter(Boolean);
+  const paid = p.status === "Paid";
+  const badge = paid ? `<span class="badge b-paid">Paid ${esc(dayLabel(p.paidOn || p.payDate))}</span>` : `<span class="badge b-sending">Being sent</span>`;
+  const rateTxt = p.rate ? `1 USD = ${Number(p.rate).toFixed(2)} PHP` : "Set on payday";
+  return `<details class="payout">
+    <summary>
+      <span class="chev">${CHEV}</span>
+      <span class="pd"><b>Payday ${esc(fmtFull(p.payDate))}</b><span class="small muted">${plural(p.videoIds.length, "video", "videos")}${p.paidTo ? ` · to ${esc(p.paidTo)}` : ""}</span></span>
+      ${badge}
+      <span class="usd">${usd2(p.usd)}</span>
+      <span class="php" style="color:${paid ? "var(--green)" : "var(--orange)"}">${p.php ? peso(p.php) : "₱ –"}</span>
+    </summary>
+    <div class="pbody">
+      <div class="facts">
+        <div><div class="kv">Earned</div><div class="v">${usd2(p.usd)}</div></div>
+        <div><div class="kv">Exchange rate</div><div class="v">${esc(rateTxt)}</div>${p.rateSource ? `<div class="small muted">${esc(p.rateSource)}</div>` : ""}</div>
+        <div><div class="kv">${paid ? "You got" : "You'll get"}</div><div class="v">${p.php ? peso(p.php) : "–"}</div>${p.paidTo ? `<div class="small muted">to ${esc(p.paidTo)}</div>` : ""}</div>
+        <div><div class="kv">${paid ? "Sent" : "Status"}</div><div class="v">${paid ? esc(fmtFull(p.paidOn || p.payDate)) : "Being sent by Wise"}</div>${(p.receipts || []).map((r) => `<div class="small"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.name || "Wise receipt")}</a></div>`).join("")}</div>
+      </div>
+      ${p.note ? `<div class="quote" style="margin:0"><b style="color:var(--orange-soft)">Note from NLT</b>${esc(p.note)}</div>` : ""}
+      <div class="vlist">
+        ${vids.map((v) => `<a class="li" href="#/video/${esc(v.id)}"><span>${esc(v.title || "(untitled)")}</span><span>${usd2(v.amount)}</span></a>`).join("")}
+        ${vids.length !== p.videoIds.length ? `<div class="li"><span class="muted">${plural(p.videoIds.length - vids.length, "other video", "other videos")}</span><span></span></div>` : ""}
+        <div class="li tot"><span>Total</span><span>${usd2(p.usd)}${p.php ? ` → ${peso(p.php)}` : ""}</span></div>
+      </div>
+    </div>
+  </details>`;
+}
+
+function renderPayments() {
+  const { videos, payouts = [] } = state.data;
+  const byId = new Map(videos.map((v) => [v.id, v]));
+  const waiting = videos.filter((v) => !v.paid && !payoutOf(v) && Number(v.amount) > 0)
+    .sort((a, b) => (a.submitted || "").localeCompare(b.submitted || ""));
+  const sending = payouts.filter((p) => p.status !== "Paid");
+  const done = payouts.filter((p) => p.status === "Paid");
+  const paidPhp = done.reduce((t, p) => t + (Number(p.php) || 0), 0);
+  const paidUsd = Math.round(done.reduce((t, p) => t + (Number(p.usd) || 0), 0) * 100) / 100;
+  const nd = nextPayday();
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const inDays = nd ? Math.round((parseDay(nd) - t0) / 86400000) : 0;
+  const when = !nd ? "" : inDays <= 0 ? "Today" : inDays === 1 ? "Tomorrow" : `In ${inDays} days`;
+
+  app.innerHTML = shell("pay", `
+    <div class="hero">
+      <div>
+        <div class="eyebrow">Payments</div>
+        <h1 class="head">Your payments</h1>
+        <p>You're paid every second Friday for everything approved since the last payday. We add it up in US dollars, convert it to Philippine pesos at that day's rate and send the pesos by Wise.</p>
+      </div>
+    </div>
+
+    <section class="tiles" aria-label="Payment summary">
+      <div class="tile"><div class="lbl">Next payday</div><div class="num date">${esc(nd ? fmtDate(nd) : "–")}</div><div class="sub">${esc(when)}</div></div>
+      <div class="tile owed"><div class="lbl">For the next payday</div><div class="num">${money(sum(waiting))}</div><div class="sub">${plural(waiting.length, "approved video", "approved videos")}</div></div>
+      <div class="tile paid"><div class="lbl">Paid so far</div><div class="num">${peso(paidPhp)}</div><div class="sub">${usd2(paidUsd)} · ${plural(done.length, "payout", "payouts")}</div></div>
+    </section>
+
+    ${sending.map((p) => `<section class="card onway" aria-label="Payout being sent">
+      <div><div class="eyebrow" style="margin-bottom:4px">On its way</div><div style="font-size:16px">Your payout of ${esc(fmtFull(p.payDate))} is being sent${p.paidTo ? ` to <b>${esc(p.paidTo)}</b>` : ""}. It shows as Paid here once it's sent.</div></div>
+      <div class="head" style="font-size:30px;color:var(--orange)">${p.php ? peso(p.php) : usd2(p.usd)}</div>
+    </section>`).join("")}
+
+    <div class="row">
+      <section class="card grow" aria-label="Payouts">
+        <div class="card-head" style="margin-bottom:6px"><h2>Payouts</h2><span class="small muted">Open one to see the videos, the rate and the receipt.</span></div>
+        ${payouts.length ? payouts.map((p) => payoutRow(p, byId)).join("") : `<div class="empty">No payouts yet. Your first one comes on ${esc(nd ? fmtDate(nd) : "the next payday")}.</div>`}
+      </section>
+
+      <div class="side">
+        <section class="card" aria-label="Next payout">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px"><div><h2 style="font-size:16px">Next payout</h2>${nd ? `<div class="small muted">${esc(fmtDate(nd))}</div>` : ""}</div><span class="head" style="font-size:22px;color:var(--orange)">${money(sum(waiting))}</span></div>
+          ${waiting.length ? `<div class="vlist" style="margin-top:12px">${waiting.map((v) => `<a class="li" href="#/video/${esc(v.id)}"><span>${esc(v.title || "(untitled)")}</span><span>${usd2(v.amount)}</span></a>`).join("")}</div>`
+            : `<p class="small muted" style="margin:12px 0 0">Nothing approved since the last payday yet.</p>`}
+          <p class="small muted" style="margin:14px 0 0">Anything approved before the payday goes in. It's converted to pesos at the rate on payday.</p>
+        </section>
+        <section class="card" aria-label="How payment works">
+          <h2 style="font-size:16px;margin-bottom:14px">How payment works</h2>
+          <ol class="how">
+            <li>NLT approves your video. It earns your rate.</li>
+            <li>Every second Friday, everything approved since the last payday goes into one payout, converted from US dollars to pesos at that day's rate.</li>
+            <li>We send the pesos by Wise and mark the payout Paid here, with the receipt when there is one.</li>
+          </ol>
+        </section>
+      </div>
+    </div>`);
+}
+
 /* ---------- video page ---------- */
+function payLine(v) {
+  const p = payoutOf(v);
+  if (v.paid || p?.status === "Paid") return p ? `Paid on ${esc(fmtFull(p.paidOn || p.payDate))} in your <a href="#/payments">${esc(p.php ? peso(p.php) : usd2(p.usd))} payout</a>.` : "This video has been paid.";
+  if (p) return `It's in your payout of ${esc(fmtFull(p.payDate))}, which is being sent now. <a href="#/payments">See payments</a>`;
+  return nextPayday() ? `It goes into your next payout on ${esc(fmtDate(nextPayday()))}.` : "It goes into your next payout.";
+}
+
 function steps(v) {
-  const fix = v.status === "Needs Resubmission";
-  const reviewing = v.status === "Submitted" || v.status === "In Review";
-  const approved = v.status === "Approved";
+  const p = payoutOf(v);
+  const paidOut = v.paid || p?.status === "Paid";
+  const fix = !paidOut && v.status === "Needs Resubmission";
+  const reviewing = !paidOut && !earns(v) && (v.status === "Submitted" || v.status === "In Review");
+  const approved = paidOut || earns(v);
   const s = [
     { cls: "done", t: "Submitted", d: dayLabel(v.submitted) },
     fix ? { cls: "fix", t: "Changes requested", d: v.reviewed ? dayLabel(v.reviewed) : "", icon: "!" }
       : reviewing ? { cls: "now", t: v.status === "In Review" ? "In review" : "Waiting for review", d: "" }
       : { cls: "done", t: "Reviewed", d: v.reviewed ? dayLabel(v.reviewed) : "" },
-    approved ? { cls: v.paid ? "done" : "now", t: "Approved", d: v.reviewed ? dayLabel(v.reviewed) : "" } : { cls: "todo", t: "Approved", d: "Next" },
-    v.paid ? { cls: "done", t: "Paid", d: "" } : { cls: "todo", t: "Paid", d: approved ? "Next" : "After approval" },
+    approved ? { cls: paidOut || p ? "done" : "now", t: "Approved", d: v.reviewed ? dayLabel(v.reviewed) : "" } : { cls: "todo", t: "Approved", d: "Next" },
+    paidOut ? { cls: "done", t: "Paid", d: p ? dayLabel(p.paidOn || p.payDate) : "" }
+      : p ? { cls: "now", t: "Being paid", d: `Payday ${dayLabel(p.payDate)}` }
+      : { cls: "todo", t: "Paid", d: approved && nextPayday() ? `Payday ${fmtDate(nextPayday())}` : "After approval" },
   ];
   const check = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5l2.6 2.6L11 4.5"/></svg>`;
   return `<ol class="steps" aria-label="Progress">${s.map((x) => `<li class="${x.cls}" ${x.cls === "now" || x.cls === "fix" ? 'aria-current="step"' : ""}>
@@ -690,11 +846,11 @@ function renderVideo(id) {
       </div>
       <p class="small muted" style="margin:16px 0 0">The new version replaces this one in the same row. Your rate per video includes one round of feedback.</p>
     </section>`;
-  } else if (v.status === "Approved") {
+  } else if (earns(v) || v.paid) {
     const when = v.publishAt ? new Date(v.publishAt) : null;
     statusCard = `<section class="card" aria-label="Approved" style="box-shadow:inset 0 0 0 1px rgba(99,217,154,0.6)">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h2 style="font-size:18px;color:var(--green)">${v.paid ? "Approved and paid" : "Approved"}</h2><span class="head" style="font-size:24px">${money(v.amount)}</span></div>
-      <p style="margin:8px 0 0;color:#E3EAE8">${v.paid ? "This video has been paid." : "Payment comes when NLT marks it as paid."}${v.posted ? " It's been posted." : when ? ` It's scheduled to go out on ${DAYS[when.getDay()]} ${when.getDate()} ${MON[when.getMonth()]}.` : ""}</p>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h2 style="font-size:18px;color:var(--green)">${v.paid || payoutOf(v)?.status === "Paid" ? "Approved and paid" : "Approved"}</h2><span class="head" style="font-size:24px">${money(v.amount)}</span></div>
+      <p style="margin:8px 0 0;color:#E3EAE8">${payLine(v)}${v.posted ? " It's been posted." : when ? ` It's scheduled to go out on ${DAYS[when.getDay()]} ${when.getDate()} ${MON[when.getMonth()]}.` : ""}</p>
       ${v.feedback ? `<div class="quote" style="margin-top:14px"><b style="color:var(--green)">Note from NLT</b>${esc(v.feedback)}</div>` : ""}
     </section>`;
   } else {
@@ -1110,7 +1266,7 @@ function mockApi(action, payload) {
       let status = "Approved", feedback = "";
       if (w === 0) status = i === 0 ? "In Review" : "Submitted";
       if (w === 1 && i === 2) { status = "Needs Resubmission"; feedback = "Music sits too loud under the crowd. Bring it down and open on the take-off, not the walk to the edge."; }
-      vids.push({ id: "recSample" + String(n++).padStart(8, "0"), title: `Batch ${14 - w} - Reel ${i + 1} - ${topics[(w * 3 + i) % topics.length]}`, status, submitted: d, reviewed: "", videoUrl: "", caption: "Sample caption.", music: "", feedback, amount: status === "Approved" ? 8 : 0, paid: w >= 3, publishAt: "", posted: false });
+      vids.push({ id: "recSample" + String(n++).padStart(8, "0"), title: `Batch ${14 - w} - Reel ${i + 1} - ${topics[(w * 3 + i) % topics.length]}`, status, submitted: d, reviewed: "", videoUrl: "", caption: "Sample caption.", music: "", feedback, amount: status === "Approved" ? 8 : 0, paid: w >= 3, publishAt: "", posted: false, _w: w });
     } });
     const role = new URLSearchParams(location.search).get("role");
     window.__mock = {
@@ -1118,6 +1274,20 @@ function mockApi(action, payload) {
       reviewer: role === "editor" ? null : { name: "Sample Reviewer", firstName: "Sample", email: "reviewer@example.com" },
       videos: vids.sort((a, b) => b.submitted.localeCompare(a.submitted)),
     };
+    // Sample payouts every second Friday: the latest is still being sent, the older ones are paid.
+    const fri = new Date(); fri.setHours(0, 0, 0, 0); while (fri.getDay() !== 5) fri.setDate(fri.getDate() + 1);
+    const payout = (n, weeks, status, extra = {}) => {
+      const ids = vids.filter((v) => weeks.includes(v._w) && v.status === "Approved").map((v) => v.id);
+      const day = iso(addDays(fri, -14 * n)), usd = ids.length * 8, rate = Math.round((63.0512 - n * 0.2137) * 10000) / 10000;
+      return { id: "recSamplePay" + n, payDate: day, status, paidOn: status === "Paid" ? day : "", usd, rate, php: Math.round(usd * rate), rateSource: `Market rate of ${fmtFull(day)}`, paidTo: "Sample Editor", note: "", receipts: [], videoIds: ids, ...extra };
+    };
+    vids.forEach((v) => { if (v._w === 2) v.paid = false; });
+    window.__mock.payouts = role === "reviewer" ? [] : [
+      payout(1, [2], "To pay"),
+      payout(2, [3, 4], "Paid", { receipts: [{ url: "https://wise.com/", name: "Wise receipt.pdf" }] }),
+      payout(3, [5, 6, 7], "Paid", { note: "First payout under the per-video rate." }),
+    ];
+    window.__mock.nextPayday = iso(fri);
     const eds = ["Ralph Hepollo", "Mark Espejo", "Rian Magtaan"];
     window.__mockQueue = vids.slice(0, 14).map((v, i) => ({ ...v, id: "recQueue" + String(i).padStart(9, "0"), editor: eds[i % 3],
       status: i < 6 ? (i === 1 ? "In Review" : "Submitted") : i < 8 ? "Needs Resubmission" : "Approved",
