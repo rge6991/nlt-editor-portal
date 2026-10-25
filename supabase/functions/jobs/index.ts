@@ -17,6 +17,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const EXPERIENCE = new Set(["Less than 1 year", "1-3 years", "3-5 years", "5+ years"]);
 const AVAILABILITY = new Set(["0-5 hours", "5-10 hours", "10-20 hours", "20-40 hours"]);
 const SKILLS = new Set(["Motion Graphics", "Color Grading", "Sound Design", "Visual Effects (VFX)", "Scriptwriting", "Copywriting/Subtitles"]);
+// Skills-test uploads go straight from the browser to Cloudinary, signed here (CLOUDINARY_API_KEY / _SECRET).
+const CLOUD_NAME = "os1vbtid";
+const VIDEO_FORMATS = "mp4,mov,m4v,webm,avi";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -146,6 +149,31 @@ async function skillsTest(req: Request, b: Record<string, unknown>) {
   return { ok: true };
 }
 
+async function sha1(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// A one-hour signature for one skills-test video upload: only with an applicant link, video formats only,
+// the applicant's own folder, capped per IP, per applicant and in total. The API secret never leaves here.
+async function uploadSignature(req: Request, b: Record<string, unknown>) {
+  const recId = clip(b.recId, 20);
+  if (!/^rec[A-Za-z0-9]{14}$/.test(recId)) throw new HttpError(400, "This link is missing your applicant reference.");
+  const task = Number(b.task);
+  if (![1, 2, 3].includes(task)) throw new HttpError(400, "Unknown task.");
+  const apiKey = Deno.env.get("CLOUDINARY_API_KEY");
+  const secret = Deno.env.get("CLOUDINARY_API_SECRET");
+  if (!apiKey || !secret) throw new HttpError(503, "Uploads aren't switched on yet. Paste a link instead.");
+  await limit(req, "upload", 10, 100);
+  if (!await allow(`upload-rec:${recId}`, "1 day", 10)) throw new HttpError(429, "That's a lot of uploads for one test. Paste a link instead.");
+  const timestamp = Math.floor(Date.now() / 1000);
+  const folder = `skills-test/${recId}`;
+  const tags = `nlt-skills-test,task-${task},rec-${recId}`;
+  // Cloudinary signs every sent parameter except file, api_key, cloud_name and resource_type, sorted by name.
+  const signature = await sha1(`allowed_formats=${VIDEO_FORMATS}&folder=${folder}&tags=${tags}&timestamp=${timestamp}${secret}`);
+  return { cloudName: CLOUD_NAME, apiKey, timestamp, folder, tags, allowedFormats: VIDEO_FORMATS, signature };
+}
+
 Deno.serve(async (req) => {
   const origin = req.headers.get("origin");
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(origin) });
@@ -154,6 +182,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     if (body.action === "apply") return json(await apply(req, body), 200, origin);
     if (body.action === "skills-test") return json(await skillsTest(req, body), 200, origin);
+    if (body.action === "upload-signature") return json(await uploadSignature(req, body), 200, origin);
     if (body.action === "ping") return json({ ok: true }, 200, origin);
     return json({ error: "Unknown action." }, 400, origin);
   } catch (e) {
