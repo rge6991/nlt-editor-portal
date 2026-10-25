@@ -341,7 +341,6 @@
 <script>
 /* NLT Editor Portal. Talks only to the portal backend; no Airtable key lives in this page. */
 const API = "https://pcqghtwfedjokbzrcrlm.supabase.co/functions/v1/portal";
-const CLOUDINARY = { cloud: "os1vbtid", preset: "nlt_editor_portal" };
 const CLOUD_VIDEO = /^https:\/\/res\.cloudinary\.com\/os1vbtid\/video\/upload\//;
 const MOCK = new URLSearchParams(location.search).has("mock");
 const PAGE = 10;
@@ -431,19 +430,30 @@ async function api(action, payload = {}) {
   return body;
 }
 
-function uploadToCloudinary(file, onProgress) {
+// The portal backend signs each upload for the logged-in editor (folder, allowed formats, a time limit),
+// so nobody can put files into NLT's Cloudinary account without logging in.
+async function uploadToCloudinary(file, onProgress) {
+  if (MOCK) return new Promise((resolve) => { let p = 0; const t = setInterval(() => { p += 25; onProgress(Math.min(p, 100)); if (p >= 100) { clearInterval(t); resolve("https://res.cloudinary.com/os1vbtid/video/upload/v1/sample.mp4"); } }, 150); });
+  const sig = await api("upload-signature");
   return new Promise((resolve, reject) => {
-    if (MOCK) { let p = 0; const t = setInterval(() => { p += 25; onProgress(Math.min(p, 100)); if (p >= 100) { clearInterval(t); resolve("https://res.cloudinary.com/os1vbtid/video/upload/v1/sample.mp4"); } }, 150); return; }
     const fd = new FormData();
     fd.append("file", file);
-    fd.append("upload_preset", CLOUDINARY.preset);
+    fd.append("api_key", sig.apiKey);
+    fd.append("timestamp", sig.timestamp);
+    fd.append("folder", sig.folder);
+    fd.append("allowed_formats", sig.allowedFormats);
+    fd.append("signature", sig.signature);
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUDINARY.cloud}/video/upload`);
+    xhr.open("POST", `https://api.cloudinary.com/v1_1/${sig.cloudName}/video/upload`);
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try { resolve(JSON.parse(xhr.responseText).secure_url); } catch { reject(new Error("Upload failed. Try again.")); }
-      } else reject(new Error("Upload failed. Try again."));
+      } else {
+        let msg = "";
+        try { msg = JSON.parse(xhr.responseText).error.message || ""; } catch { /* not JSON */ }
+        reject(new Error(/format/i.test(msg) ? "That file type isn't allowed. Upload an MP4 or MOV video." : "Upload failed. Try again."));
+      }
     };
     xhr.onerror = () => reject(new Error("Network error during upload. Try again."));
     xhr.send(fd);

@@ -143,6 +143,10 @@ const EMAIL_RE = /^[a-z0-9._%+'-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 
 const CODE_TTL_MIN = 10;
 const SESSION_DAYS = 30;
+// Uploads go straight from the browser to Cloudinary, signed here (CLOUDINARY_API_KEY / _SECRET secrets).
+const CLOUD_NAME = "os1vbtid";
+const VIDEO_FORMATS = "mp4,mov,m4v,webm,avi";
+const UPLOADS_PER_HOUR = 30;
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -887,6 +891,29 @@ async function checkCaption(req: Request, body: Record<string, unknown>) {
   return { verdict, spelling, tone };
 }
 
+// ---------- uploads ----------
+
+async function sha1(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// A one-hour signature for one Cloudinary video upload by this editor: their own folder, video formats only.
+// The API secret never leaves the server; Cloudinary rejects uploads without a valid signature.
+async function uploadSignature(req: Request) {
+  const s = await sessionFrom(req);
+  const editorId = await requireEditor(s);
+  const apiKey = Deno.env.get("CLOUDINARY_API_KEY");
+  const secret = Deno.env.get("CLOUDINARY_API_SECRET");
+  if (!apiKey || !secret) throw new HttpError(503, "Uploads aren't switched on yet. Try again later.");
+  if (!await allow(`upload:${editorId}`, "1 hour", UPLOADS_PER_HOUR)) throw new HttpError(429, "That's a lot of uploads for one hour. Wait a bit, then try again.");
+  const timestamp = Math.floor(Date.now() / 1000);
+  const folder = `editor-portal/${editorId}`;
+  // Cloudinary signs every sent parameter except file, api_key, cloud_name and resource_type, sorted by name.
+  const signature = await sha1(`allowed_formats=${VIDEO_FORMATS}&folder=${folder}&timestamp=${timestamp}${secret}`);
+  return { cloudName: CLOUD_NAME, apiKey, timestamp, folder, allowedFormats: VIDEO_FORMATS, signature };
+}
+
 async function logout(req: Request) {
   const s = await sessionFrom(req);
   await db.from("sessions").delete().eq("token_hash", await sha256(s.token));
@@ -910,6 +937,7 @@ Deno.serve(async (req) => {
       case "review-queue": return json(await reviewQueue(req), 200, origin);
       case "review": return json(await review(req, body), 200, origin);
       case "check-caption": return json(await checkCaption(req, body), 200, origin);
+      case "upload-signature": return json(await uploadSignature(req), 200, origin);
       case "logout": return json(await logout(req), 200, origin);
       case "ping": return json({ ok: true }, 200, origin);
       default: return json({ error: "Unknown action." }, 400, origin);
