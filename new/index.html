@@ -506,7 +506,7 @@ function shell(active, inner) {
   <header class="top"><div class="top-in">
     <a class="brand" href="#/" aria-label="No Limits Tour editor portal, home">${LOGO_SVG}<span class="sep"></span><span class="tag">Editor portal</span></a>
     <nav class="main" aria-label="Main">
-      ${isEditor() ? link("dash", "#/", "Dashboard") + link("tpl", "#/templates", "Templates") + link("submit", "#/submit", 'Submit<span class="lg"> a video</span>') + link("pay", "#/payments", "Payments") : ""}
+      ${isEditor() ? link("dash", "#/", "Dashboard") + (templates().length ? link("tpl", "#/templates", "Templates") : "") + link("submit", "#/submit", 'Submit<span class="lg"> a video</span>') + link("pay", "#/payments", "Payments") : ""}
       ${isReviewer() ? link("review", "#/review", "Review", waiting ? ` <span class="count">${waiting}</span>` : "") : ""}
       ${ed ? `<span class="who"><span class="avatar" aria-hidden="true">${esc(initials)}</span>${esc(ed.name)}</span>` : ""}
       <button class="linkbtn" style="color:var(--soft)" data-act="logout">Log out</button>
@@ -931,7 +931,7 @@ function templateCard(t) {
     <div class="top">
       <div style="min-width:0">
         <h2 style="font-size:20px;line-height:1.2">${esc(t.name)}</h2>
-        <div class="meta">${levelBadge(t.level)}${left ? `<span class="${t.full ? "muted" : "owe"}">${esc(left)}</span>` : ""}</div>
+        <div class="meta">${levelBadge(t.level)}${t.live === false ? `<span class="badge b-sub" title="Only the NLT team sees this template until it goes live">Team only · testing</span>` : ""}${left ?`<span class="${t.full ? "muted" : "owe"}">${esc(left)}</span>` : ""}</div>
       </div>
       <div class="price"><b>${money(payFor(t))}</b><span class="small muted">per approved video</span></div>
     </div>
@@ -969,7 +969,7 @@ function templatePicker(pre) {
   const list = templates();
   if (!list.length) return "";
   const sel = list.some((t) => t.id === pre && !t.full) || pre === "own" ? pre : "";
-  const opt = (t) => `<option value="${esc(t.id)}"${t.id === sel ? " selected" : ""}${t.full ? " disabled" : ""}>${esc(t.name)}${t.level ? ` · ${esc(t.level)}` : ""} · ${money(payFor(t))}${t.full ? " · full" : ""}</option>`;
+  const opt = (t) => `<option value="${esc(t.id)}"${t.id === sel ? " selected" : ""}${t.full ? " disabled" : ""}>${esc(t.name)}${t.level ? ` · ${esc(t.level)}` : ""} · ${money(payFor(t))}${t.live === false ? " · team only" : ""}${t.full ? " · full" : ""}</option>`;
   return `<div class="field">
     <label for="tpl">Template <span class="req">Required</span></label>
     <select class="input" id="tpl" required>
@@ -1449,16 +1449,17 @@ function mockApi(action, payload) {
     ];
     window.__mock.nextPayday = iso(fri);
     const T = [
-      { id: "recSampleTpl00001", name: "One-shot slow-mo dive", level: "Simple", pay: 3, needed: 10, open: 6, full: false, example: "https://www.facebook.com/reel/2506444856501817",
+      { id: "recSampleTpl00001", name: "One-shot slow-mo dive", level: "Simple", pay: 3, needed: 10, open: 6, full: false, live: true, example: "https://www.facebook.com/reel/2506444856501817",
         brief: "1. Pick one take where the athlete already stands at the edge and the height is clear in the first frame. No walk-up, no logo, no title card.\n2. Keep it one continuous shot from take-off to entry.\n3. Slow the fall down so it fills most of the reel. Total length 10 to 15 seconds, so it loops.\n4. After the entry, hold 3 to 4 seconds on the calm water. No end card.\n5. One video per athlete. Write a new line of text for each one.",
         textOnScreen: "One short line, first person, lowercase. Small white text, centered. Gone before the entry.\nExample: rich because I know what this feels like",
         caption: "One lowercase line that carries on from the text on screen. No hashtags.\nExample: money will never make you feel so alive", music: "Slow, cinematic track from Artlist (orchestral or piano). Don't cut to the beat." },
-      { id: "recSampleTpl00002", name: "Three-angle podium moment", level: "Advanced", pay: 6, needed: 4, open: 0, full: true, example: "https://www.instagram.com/reel/Def8YMZhc4_/",
+      { id: "recSampleTpl00002", name: "Three-angle podium moment", level: "Advanced", pay: 6, needed: 4, open: 0, full: true, live: true, example: "https://www.instagram.com/reel/Def8YMZhc4_/",
         brief: "1. Open on the wide shot of the podium.\n2. Cut to the close-up of the winner, then the crowd.\n3. 12 to 18 seconds.", textOnScreen: "", caption: "Short tease, then the athlete's name.\nExample: Maybe the perfect shot does exist…", music: "Upbeat track from Artlist. Cut on the beat." },
-      { id: "recSampleTpl00003", name: "Athlete intro", level: "Simple", pay: null, needed: null, open: null, full: false, example: "",
+      { id: "recSampleTpl00003", name: "Athlete intro", level: "Simple", pay: null, needed: null, open: null, full: false, live: false, example: "",
         brief: "1. Best dive of the athlete, one angle.\n2. Name and country on screen in the first second.\n3. 8 to 12 seconds.", textOnScreen: "Name and country, first second only.", caption: "", music: "" },
     ];
-    window.__mock.templates = role === "reviewer" ? [] : T;
+    // ?tpl=0 shows what an editor sees while no template is live for them.
+    window.__mock.templates = role === "reviewer" || new URLSearchParams(location.search).get("tpl") === "0" ? [] : T;
     // The latest videos were made from templates.
     vids.slice(0, 4).forEach((v, i) => { const t = T[i % 2]; v.template = { id: t.id, name: t.name, pay: t.pay }; });
     const eds = ["Ralph Hepollo", "Mark Espejo", "Rian Magtaan"];

@@ -19,8 +19,10 @@ const T_PAYOUTS = "tblU046MpsrNhN1Sd";
 // Caption Examples: rows with "Use in checker" ticked are the examples the caption check judges against.
 const T_CAPTIONS = "tbllar9yr94bmdzi4";
 const CX = { caption: "fldNGy7VRCQ1XFR6M", why: "fldN5j0BDHvDxiWTW", use: "fldGm9qF4fxHHgapU" };
-// Templates: Active rows are shown to editors, who pick one when they submit.
-// A video made with a template pays the template's Pay once approved (Payout formula in Airtable).
+// Templates: Active rows show up in the portal and can be picked when submitting.
+// While "Live for editors" is unticked, only the team (anyone in Reviewers) sees a template, for testing.
+// A video made with a template pays the template's Pay once approved (Payout formula in Airtable);
+// since only the team can pick a template before it's live, real editors' pay is unchanged until then.
 // The internal Best Practices link is never read here.
 const T_TEMPLATES = "tblgOYxWHFZ4peswS";
 const TP = {
@@ -35,6 +37,7 @@ const TP = {
   caption: "fldlx6p6Oe9H8iBk8",
   music: "fldduTsffgEdHDsSk",
   active: "fldzWMkpVMi2E94hD",
+  live: "fldX9foaMixWqRG83",
 };
 // Paydays are every second Friday from this date. Keep in step with PAY_ANCHOR in the Airtable "Pay run" script.
 const PAY_ANCHOR = "2026-10-23";
@@ -333,9 +336,13 @@ function shapeTemplate(rec: { id: string; fields: Record<string, unknown> }) {
     caption: String(f[TP.caption] ?? ""),
     music: String(f[TP.music] ?? ""),
     active: f[TP.active] === true,
+    live: f[TP.live] === true,
   };
 }
 type Template = ReturnType<typeof shapeTemplate>;
+
+// Who can see and pick a template: everyone once it's live, only the team before that.
+const visibleTo = (t: Template, team: boolean) => t.active && (t.live || team);
 
 // Every template, active or not, so older videos still show their template's name.
 async function getTemplates(): Promise<Template[]> {
@@ -358,13 +365,14 @@ function editorTemplate(t: Template) {
   return rest;
 }
 
-// "" or "own" means the editor's own idea. Anything else must be an active template that isn't full.
-async function pickTemplate(raw: unknown): Promise<string | null> {
+// "" or "own" means the editor's own idea. Anything else must be a template this person can see that isn't full.
+async function pickTemplate(raw: unknown, s: { reviewerId: string | null }): Promise<string | null> {
   const id = clip(raw, 20);
   if (!id || id === "own") return null;
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new HttpError(400, "Pick a template from the list.");
   const t = (await getTemplates()).find((x) => x.id === id);
-  if (!t || !t.active) throw new HttpError(400, "That template isn't available any more. Pick another one.");
+  const team = !!(t && t.active && !t.live && s.reviewerId && await activeReviewer(s.reviewerId));
+  if (!t || !visibleTo(t, team)) throw new HttpError(400, "That template isn't available any more. Pick another one.");
   if (t.full) throw new HttpError(409, `We have enough "${t.name}" videos for now. Pick another template.`);
   return t.id;
 }
@@ -564,7 +572,7 @@ async function dashboard(req: Request) {
       getTemplates().catch((e) => { console.error("templates", e); return [] as Template[]; }),
     ]);
     const tmap = new Map(tlist.map((t) => [t.id, t]));
-    templates = tlist.filter((t) => t.active).map(editorTemplate);
+    templates = tlist.filter((t) => visibleTo(t, !!reviewer)).map(editorTemplate);
     videos = vrecs.map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }, tmap))
       .sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
     payouts = precs.map(shapePayout).sort((a, b) => (b.payDate || "").localeCompare(a.payDate || ""));
@@ -608,7 +616,7 @@ async function submit(req: Request, body: Record<string, unknown>) {
   if (!CLOUDINARY_VIDEO.test(videoUrl)) throw new HttpError(400, "Upload the video file first.");
   if (!title) throw new HttpError(400, "Give the video a title.");
   const { caption, music } = requiredSubmission(body);
-  const templateId = await pickTemplate(body.templateId);
+  const templateId = await pickTemplate(body.templateId, s);
   const fields: Record<string, unknown> = {
     [V.title]: title,
     [V.editor]: [editorId],
