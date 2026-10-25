@@ -4,6 +4,7 @@
 // Each editor only ever gets their own videos and payouts, and never any bank or payment-method fields.
 // Reviewers (Reviewers table, Active ticked) get the review queue and can approve or request changes.
 // Caption check: spelling and NLT tone notes from Claude. Suggestions only; it never writes a caption.
+// Templates: editors see the Active rows of the Templates table and pick one when they submit.
 // Payouts: every second Friday the Airtable "Pay run" automation creates one Payouts row per editor
 // (USD total, USD→PHP rate, pesos sent). Editors see them on the Payments page.
 
@@ -15,6 +16,29 @@ const T_EDITORS = "tbla4YKeVLmMN8Ay6";
 const T_VIDEOS = "tblZm9wz5Truwc9au";
 const T_REVIEWERS = "tblqHqYCyBNKqq88k";
 const T_PAYOUTS = "tblU046MpsrNhN1Sd";
+// Caption Examples: rows with "Use in checker" ticked are the examples the caption check judges against.
+const T_CAPTIONS = "tbllar9yr94bmdzi4";
+const CX = { caption: "fldNGy7VRCQ1XFR6M", why: "fldN5j0BDHvDxiWTW", use: "fldGm9qF4fxHHgapU" };
+// Templates: Active rows show up in the portal and can be picked when submitting.
+// While "Live for editors" is unticked, only the team (anyone in Reviewers) sees a template, for testing.
+// A video made with a template pays the template's Pay once approved (Payout formula in Airtable);
+// since only the team can pick a template before it's live, real editors' pay is unchanged until then.
+// The internal Best Practices link is never read here.
+const T_TEMPLATES = "tblgOYxWHFZ4peswS";
+const TP = {
+  name: "fldkzD6rI2M5xBFCt",
+  level: "fld1HGnsTF9lzapMy",
+  pay: "fldqdIvNapqByt6bo",
+  needed: "fldsaneZRYbFT9CyS",
+  open: "fldRndMphlqLzqaa7",
+  example: "fldjNxAFSescaDwbc",
+  brief: "fldBTGYMukYotyruJ",
+  text: "fld8tcWoJB4QSbwMu",
+  caption: "fldlx6p6Oe9H8iBk8",
+  music: "fldduTsffgEdHDsSk",
+  active: "fldzWMkpVMi2E94hD",
+  live: "fldX9foaMixWqRG83",
+};
 // Paydays are every second Friday from this date. Keep in step with PAY_ANCHOR in the Airtable "Pay run" script.
 const PAY_ANCHOR = "2026-10-23";
 
@@ -58,6 +82,7 @@ const V = {
   posted: "fldNaAVRjB5BfCR23",
   reviewedBy: "fldeWUK7NvZf4WPgh",
   history: "fldlI5mW1Hv3SHPDb",
+  template: "fldnRWL6CYJ29T1kD",
 };
 const R = {
   name: "fldgefYb3VGVGtecX",
@@ -68,32 +93,23 @@ const MUSIC_URL = /^https?:\/\/\S+\.\S+/i;
 
 const CLAUDE_MODEL = "claude-haiku-5-5";
 const CHECKS_PER_HOUR = 30;
-const CAPTION_VOICE = `You check social media captions for No Limits Tour (NLT), the professional cliff diving world tour. A video editor wrote the caption below. Point out spelling, grammar and punctuation mistakes, and say briefly where the caption drifts from NLT's voice.
+const VOICE_RULES = `You check social media captions for No Limits Tour (NLT), the professional cliff diving world tour. A video editor wrote the caption below. Point out spelling, grammar and punctuation mistakes, and say briefly where the caption drifts from NLT's voice.
 
 Never write a new caption and never rewrite whole sentences. The caption stays the editor's own work; you only point things out.
 
 NLT's voice for captions:
 - Short and punchy: one or two short lines. Let the dive speak.
-- Direct, confident and warm. Playful humour is welcome.
-- Often ends with a short question to the viewer, to get comments.
+- A short tease that the video then pays off works well, for example "Maybe the perfect shot does exist…".
+- When the video is about one athlete, name them or @tag them. Saying where or at which event (for example Area 47) helps people find the post.
+- Direct, confident and warm. Playful humor is welcome.
+- A question to the viewer is optional. If there is one, it should be specific and easy to answer: a number, or a pick between two things. Point out generic questions such as "Would you jump?"; on NLT's posts they got no answers.
 - One or two emoji at the end of a line, not more.
-- British English spelling.
+- American English spelling (color, favorite, center).
 - No em dashes.
-- No generic sport-marketing words such as unleash, ignite, elevate or epic journey.
-- No block of hashtags. A few relevant hashtags at the very end are fine.
-- Cliff diving is a professional sport: never call it a stunt, a show or a trick.
-
-Captions NLT has published:
-- The calm before the chaos. 👀 / What would be going through your mind up there?
-- \u201cI don\u2019t think I\u2019m ready yet.\u201d Famous last words. 😂🔥
-- Six divers. Six different ways to defy gravity. ⚡️ / Which jump caught your eye? 👀
-- When the air becomes your dance floor. 🪽 / Would you call this art or adrenaline? 👇
-- Be honest\u2026 how many spins did you count? 🌀👇
-- Different style. Same love for the air. Which is yours?
-- Hard work paid off. 🏆
-- Oui oui\u2026 straight to the water. 😂
-
-How to answer:
+- No generic sport-marketing words such as unleash, ignite, elevate or epic journey, and no lines that would fit any sports video, such as "hard work paid off".
+- Hashtags are optional: at most five, all at the very end (Instagram allows five).
+- Cliff diving is a professional sport: never call it a stunt, a show or a trick.`;
+const VOICE_ANSWER = `How to answer:
 - spelling: only real mistakes. "wrong" is copied exactly from the caption, a few words long, and "right" is the corrected version of that same snippet. Leave names, emoji, hashtags, deliberate slang and style choices alone.
 - tone: at most three notes, one short sentence each, in plain English. Each note names the part of the caption it is about and says what to change. Leave it empty when the caption fits the voice.
 - verdict: "ready" when nothing important needs changing, "small fixes" for spelling or small tone points, "needs work" when the caption clearly misses the voice or is hard to understand.`;
@@ -300,6 +316,72 @@ function nextPayday(): string {
   return new Date((day(PAY_ANCHOR) + add) * 86400000).toISOString().slice(0, 10);
 }
 
+// ---------- templates ----------
+
+function shapeTemplate(rec: { id: string; fields: Record<string, unknown> }) {
+  const f = rec.fields;
+  const example = String(f[TP.example] ?? "");
+  const open = num(f[TP.open]);
+  return {
+    id: rec.id,
+    name: String(f[TP.name] ?? "").trim() || "Template",
+    level: selectName(f[TP.level]),
+    pay: num(f[TP.pay]),
+    needed: num(f[TP.needed]),
+    open,
+    full: open !== null && open <= 0,
+    example: /^https:\/\//.test(example) ? example : "",
+    brief: String(f[TP.brief] ?? ""),
+    textOnScreen: String(f[TP.text] ?? ""),
+    caption: String(f[TP.caption] ?? ""),
+    music: String(f[TP.music] ?? ""),
+    active: f[TP.active] === true,
+    live: f[TP.live] === true,
+  };
+}
+type Template = ReturnType<typeof shapeTemplate>;
+
+// Who can see and pick a template: everyone once it's live, only the team before that.
+const visibleTo = (t: Template, team: boolean) => t.active && (t.live || team);
+
+// Every template, active or not, so older videos still show their template's name.
+async function getTemplates(): Promise<Template[]> {
+  const out: Template[] = [];
+  const fields = Object.values(TP).map((f) => `fields[]=${f}`).join("&");
+  let offset = "";
+  do {
+    const data = await airtable(`${T_TEMPLATES}?${fields}&returnFieldsByFieldId=true&pageSize=100${offset ? `&offset=${offset}` : ""}`);
+    for (const r of data.records ?? []) out.push(shapeTemplate(r));
+    offset = data.offset ?? "";
+  } while (offset);
+  // Simple before Advanced, open before full.
+  const rank = (t: Template) => (t.full ? 2 : 0) + (t.level === "Advanced" ? 1 : 0);
+  return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+// What editors see of a template.
+function editorTemplate(t: Template) {
+  const { active: _active, ...rest } = t;
+  return rest;
+}
+
+// "" or "own" means the editor's own idea. Anything else must be a template this person can see that isn't full.
+async function pickTemplate(raw: unknown, s: { reviewerId: string | null }): Promise<string | null> {
+  const id = clip(raw, 20);
+  if (!id || id === "own") return null;
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new HttpError(400, "Pick a template from the list.");
+  const t = (await getTemplates()).find((x) => x.id === id);
+  const team = !!(t && t.active && !t.live && s.reviewerId && await activeReviewer(s.reviewerId));
+  if (!t || !visibleTo(t, team)) throw new HttpError(400, "That template isn't available any more. Pick another one.");
+  if (t.full) throw new HttpError(409, `We have enough "${t.name}" videos for now. Pick another template.`);
+  return t.id;
+}
+
+function templateOf(f: Record<string, unknown>, templates: Map<string, Template>) {
+  const id = ((f[V.template] as string[] | undefined) ?? [])[0];
+  return id ? templates.get(id) ?? null : null;
+}
+
 // ---------- reviewers ----------
 
 async function findReviewerByEmail(email: string) {
@@ -337,10 +419,12 @@ async function editorNames(): Promise<Map<string, string>> {
   return names;
 }
 
-function shapeVideo(rec: { id: string; fields: Record<string, unknown> }) {
+function shapeVideo(rec: { id: string; fields: Record<string, unknown> }, templates: Map<string, Template> = new Map()) {
   const f = rec.fields;
   const link = String(f[V.link] ?? "");
+  const t = templateOf(f, templates);
   return {
+    template: t ? { id: t.id, name: t.name, pay: t.pay } : null,
     id: rec.id,
     title: String(f[V.title] ?? ""),
     status: selectName(f[V.status]) || "Submitted",
@@ -477,15 +561,19 @@ async function dashboard(req: Request) {
   let editor = null;
   let videos: ReturnType<typeof shapeVideo>[] = [];
   let payouts: ReturnType<typeof shapePayout>[] = [];
+  let templates: ReturnType<typeof editorTemplate>[] = [];
   if (ed) {
     const ids = (ed.fields?.[E.videos] as string[] | undefined) ?? [];
     const payoutIds = (ed.fields?.[E.payouts] as string[] | undefined) ?? [];
-    // A payouts hiccup must never stop editors from seeing and submitting videos.
-    const [vrecs, precs] = await Promise.all([
+    // A payouts or templates hiccup must never stop editors from seeing and submitting videos.
+    const [vrecs, precs, tlist] = await Promise.all([
       getVideos(ids),
       getPayouts(payoutIds).catch((e) => { console.error("payouts", e); return []; }),
+      getTemplates().catch((e) => { console.error("templates", e); return [] as Template[]; }),
     ]);
-    videos = vrecs.map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }))
+    const tmap = new Map(tlist.map((t) => [t.id, t]));
+    templates = tlist.filter((t) => visibleTo(t, !!reviewer)).map(editorTemplate);
+    videos = vrecs.map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }, tmap))
       .sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
     payouts = precs.map(shapePayout).sort((a, b) => (b.payDate || "").localeCompare(a.payDate || ""));
     const name = String(ed.fields?.[E.name] ?? "");
@@ -502,6 +590,7 @@ async function dashboard(req: Request) {
     reviewer: reviewer ? { name: reviewer.name, firstName: reviewer.name.split(" ")[0] || reviewer.name, email: s.email } : null,
     videos,
     payouts,
+    templates,
     nextPayday: nextPayday(),
   };
 }
@@ -527,6 +616,7 @@ async function submit(req: Request, body: Record<string, unknown>) {
   if (!CLOUDINARY_VIDEO.test(videoUrl)) throw new HttpError(400, "Upload the video file first.");
   if (!title) throw new HttpError(400, "Give the video a title.");
   const { caption, music } = requiredSubmission(body);
+  const templateId = await pickTemplate(body.templateId, s);
   const fields: Record<string, unknown> = {
     [V.title]: title,
     [V.editor]: [editorId],
@@ -536,6 +626,7 @@ async function submit(req: Request, body: Record<string, unknown>) {
     [V.status]: "Submitted",
     [V.submitted]: viennaToday(),
   };
+  if (templateId) fields[V.template] = [templateId];
   const data = await airtable(T_VIDEOS, { method: "POST", body: JSON.stringify({ records: [{ fields }], typecast: true }) });
   return { id: data.records?.[0]?.id };
 }
@@ -577,7 +668,7 @@ const QUEUE_FORMULA = `OR({Status}="Submitted",{Status}="In Review",{Status}="Ne
 async function reviewQueue(req: Request) {
   const s = await sessionFrom(req);
   const reviewer = await requireReviewer(s);
-  const fields = [V.title, V.editor, V.caption, V.status, V.notes, V.submitted, V.reviewed, V.link, V.music, V.reviewedBy, V.history]
+  const fields = [V.title, V.editor, V.caption, V.status, V.notes, V.submitted, V.reviewed, V.link, V.music, V.reviewedBy, V.history, V.template]
     .map((f) => `fields[]=${f}`).join("&");
   const recs: { id: string; fields: Record<string, unknown> }[] = [];
   let offset = "";
@@ -586,12 +677,18 @@ async function reviewQueue(req: Request) {
     recs.push(...(data.records ?? []));
     offset = data.offset ?? "";
   } while (offset && recs.length < 500);
-  const names = await editorNames();
+  const [names, tlist] = await Promise.all([
+    editorNames(),
+    getTemplates().catch((e) => { console.error("templates", e); return [] as Template[]; }),
+  ]);
+  const tmap = new Map(tlist.map((t) => [t.id, t]));
   const videos = recs.map((r) => {
     const f = r.fields;
     const link = String(f[V.link] ?? "");
     const editorName = ((f[V.editor] as string[] | undefined) ?? []).map((id) => names.get(id) ?? "").filter(Boolean).join(", ");
+    const t = templateOf(f, tmap);
     return {
+      template: t ? editorTemplate(t) : null,
       id: r.id,
       title: String(f[V.title] ?? ""),
       editor: editorName || "Unknown editor",
@@ -643,6 +740,32 @@ async function review(req: Request, body: Record<string, unknown>) {
 
 // ---------- caption check ----------
 
+let exampleCache: { at: number; list: { caption: string; why: string }[] } | null = null;
+async function captionExamples() {
+  if (exampleCache && Date.now() - exampleCache.at < 10 * 60 * 1000) return exampleCache.list;
+  try {
+    const fields = [CX.caption, CX.why].map((f) => `fields[]=${f}`).join("&");
+    const formula = encodeURIComponent(`{Use in checker}`);
+    const data = await airtable(`${T_CAPTIONS}?filterByFormula=${formula}&${fields}&returnFieldsByFieldId=true&pageSize=100`);
+    const list = (data.records ?? [])
+      .map((r: { fields: Record<string, unknown> }) => ({ caption: String(r.fields?.[CX.caption] ?? "").trim(), why: String(r.fields?.[CX.why] ?? "").trim() }))
+      .filter((x: { caption: string }) => x.caption)
+      .slice(0, 40);
+    exampleCache = { at: Date.now(), list };
+    return list;
+  } catch (e) {
+    console.error("caption examples", e);
+    return exampleCache?.list ?? [];
+  }
+}
+
+function captionSystem(examples: { caption: string; why: string }[]) {
+  const ex = examples.length
+    ? "Captions NLT likes (from our examples list in Airtable):\n" + examples.map((x) => `- ${x.caption.replace(/\s*\n+\s*/g, " / ")}${x.why ? ` (why it works: ${x.why})` : ""}`).join("\n") + "\n\n"
+    : "";
+  return `${VOICE_RULES}\n\n${ex}${VOICE_ANSWER}`;
+}
+
 async function checkCaption(req: Request, body: Record<string, unknown>) {
   const s = await sessionFrom(req);
   const caption = clip(body.caption, 2200);
@@ -668,7 +791,7 @@ async function checkCaption(req: Request, body: Record<string, unknown>) {
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 2000,
-        system: CAPTION_VOICE,
+        system: captionSystem(await captionExamples()),
         messages: [{ role: "user", content: `Caption to check:\n\n${caption}` }],
         output_config: { format: { type: "json_schema", schema: CHECK_SCHEMA } },
       }),

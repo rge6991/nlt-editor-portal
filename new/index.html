@@ -266,6 +266,20 @@
   .check-box .tone li { display: list-item; list-style: disc; margin-left: 18px; color: #E3EAE8; }
   .fixbtn-sm { border: 1px solid rgba(255,255,255,0.3); background: none; color: var(--white); border-radius: 4px; padding: 4px 10px; min-height: 30px; cursor: pointer; font-size: 13px; }
   .fixbtn-sm:hover { border-color: rgba(255,255,255,0.6); }
+  /* Templates */
+  .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); gap: 20px; align-items: stretch; }
+  .tcard { display: flex; flex-direction: column; gap: 16px; }
+  .tcard .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+  .tcard .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; font-size: 14px; }
+  .tcard .price { text-align: right; flex: 0 0 auto; }
+  .tcard .price b { display: block; font-family: 'NLT Headline', sans-serif; font-size: 26px; line-height: 1.1; }
+  .tcard.full { opacity: 0.62; }
+  .tcard .foot { margin-top: auto; padding-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .b-simple { background: rgba(99,217,154,0.16); color: var(--green); }
+  .b-adv { background: rgba(240,120,29,0.2); color: var(--orange-soft); }
+  select.input { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 44px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='%23ffffff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 5l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 16px center; }
+  select.input option { background: #0B4237; color: #fff; }
+  details.brief summary { cursor: pointer; color: var(--soft); font-size: 13px; }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #154F46; color: var(--white); padding: 12px 18px; border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.3); font-size: 14px; z-index: 10; }
   .loading { padding: 80px 0; text-align: center; color: var(--muted); }
 
@@ -373,7 +387,14 @@ const ageLabel = (s) => { const d = daysSince(s); return d === 0 ? "Today" : d =
 const MUSIC_URL = /^https?:\/\/\S+\.\S+/i;
 const isEditor = () => !!state.data?.editor;
 // Only approved videos are paid. Before approval, show what the video will earn.
-const expected = (v) => v.status === "Approved" || v.amount ? v.amount : (state.data?.editor?.payModel === "Per Hour" ? 0 : Number(state.data?.editor?.rate) || 0);
+const expected = (v) => v.status === "Approved" || v.amount ? v.amount
+  : v.template && v.template.pay != null ? Number(v.template.pay)
+  : (state.data?.editor?.payModel === "Per Hour" ? 0 : Number(state.data?.editor?.rate) || 0);
+// Templates: what an editor gets for one. A template without its own Pay pays the editor's rate.
+const templates = () => state.data?.templates || [];
+const ownRate = () => Number(state.data?.editor?.rate) || 0;
+const payFor = (t) => (t && t.pay != null ? Number(t.pay) : ownRate());
+const levelBadge = (l) => (l ? `<span class="badge ${l === "Advanced" ? "b-adv" : "b-simple"}">${esc(l)}</span>` : "");
 const amountCell = (v) => v.status === "Approved" || v.amount ? money(v.amount) : `<span class="pending" title="Paid once approved">${money(expected(v))}</span>`;
 const isReviewer = () => !!state.data?.reviewer;
 
@@ -465,7 +486,8 @@ async function render() {
   if (h === "#/review" && isReviewer()) return renderQueue();
   if (!isEditor()) { go("#/review"); return; }
   if (h.startsWith("#/video/")) return renderVideo(h.slice(8));
-  if (h === "#/submit") return renderSubmit();
+  if (h === "#/templates") return renderTemplates();
+  if (h === "#/submit" || h.startsWith("#/submit/")) return renderSubmit(h.slice(9));
   if (h === "#/payments") return renderPayments();
   return renderDashboard();
 }
@@ -484,7 +506,7 @@ function shell(active, inner) {
   <header class="top"><div class="top-in">
     <a class="brand" href="#/" aria-label="No Limits Tour editor portal, home">${LOGO_SVG}<span class="sep"></span><span class="tag">Editor portal</span></a>
     <nav class="main" aria-label="Main">
-      ${isEditor() ? link("dash", "#/", "Dashboard") + link("submit", "#/submit", 'Submit<span class="lg"> a video</span>') + link("pay", "#/payments", "Payments") : ""}
+      ${isEditor() ? link("dash", "#/", "Dashboard") + (templates().length ? link("tpl", "#/templates", "Templates") : "") + link("submit", "#/submit", 'Submit<span class="lg"> a video</span>') + link("pay", "#/payments", "Payments") : ""}
       ${isReviewer() ? link("review", "#/review", "Review", waiting ? ` <span class="count">${waiting}</span>` : "") : ""}
       ${ed ? `<span class="who"><span class="avatar" aria-hidden="true">${esc(initials)}</span>${esc(ed.name)}</span>` : ""}
       <button class="linkbtn" style="color:var(--soft)" data-act="logout">Log out</button>
@@ -616,7 +638,7 @@ function videoRow(v) {
   const t = thumbUrl(v.videoUrl);
   return `<a class="vrow" href="#/video/${esc(v.id)}">
     ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
-    <div class="vinfo"><div class="vt">${esc(v.title || "(untitled)")}</div><div class="small muted">Submitted ${esc(dayLabel(v.submitted))}</div><div class="badges m">${statusBadge(v.status)}${payBadge(v)}</div></div>
+    <div class="vinfo"><div class="vt">${esc(v.title || "(untitled)")}</div><div class="small muted">Submitted ${esc(dayLabel(v.submitted))}${v.template ? ` · ${esc(v.template.name)}` : ""}</div><div class="badges m">${statusBadge(v.status)}${payBadge(v)}</div></div>
     <div class="badges d">${statusBadge(v.status)}${payBadge(v)}</div>
     <div class="amt">${amountCell(v)}</div>
   </a>`;
@@ -640,15 +662,20 @@ function renderDashboard() {
   const ws = weekStart(today);
   const rateLine = editor.payModel === "Per Hour" ? `${money(editor.rate)} per hour` : `${money(editor.rate)} per approved video`;
   const rateNote = editor.payModel === "Per Hour" ? "" : ", including one round of feedback and the caption";
+  const tplNote = templates().some((t) => t.pay != null) ? " Videos made from a template pay the template's price." : "";
+  const openTpl = templates().filter((t) => !t.full);
 
   app.innerHTML = shell("dash", `
     <div class="hero">
       <div>
         <div class="eyebrow">${DAYS[today.getDay()]} ${today.getDate()} ${MONTHS[today.getMonth()]}</div>
         <h1 class="head">Hi, ${esc(editor.firstName)}</h1>
-        <p>You're paid <strong style="color:#fff">${rateLine}</strong>${rateNote}. Here's what you've submitted and what's been paid.</p>
+        <p>You're paid <strong style="color:#fff">${rateLine}</strong>${rateNote}.${tplNote} Here's what you've submitted and what's been paid.</p>
       </div>
-      <a class="btn" href="#/submit">Submit a video</a>
+      <div style="display:flex;flex-wrap:wrap;gap:12px">
+        ${openTpl.length ? `<a class="btn ghost" href="#/templates" style="min-height:48px">${plural(openTpl.length, "template", "templates")} to make</a>` : ""}
+        <a class="btn" href="#/submit">Submit a video</a>
+      </div>
     </div>
 
     <section class="tiles" aria-label="Summary">
@@ -850,7 +877,7 @@ function renderVideo(id) {
       <h2 style="font-size:18px;margin-bottom:16px">Upload a new version</h2>
       <div style="display:flex;flex-direction:column;gap:16px">
         <div id="reDrop">${dropzone("reFile")}</div>
-        <div class="field"><label for="reCaption">Caption <span class="req">Required</span></label><textarea class="input" id="reCaption" rows="4" required spellcheck="true" lang="en-GB">${esc(v.caption)}</textarea><div class="check-row"><span></span><button type="button" class="btn ghost" data-act="checkCaption" data-for="reCaption">Check spelling and tone</button></div><div id="reCaptionCheck"></div></div>
+        <div class="field"><label for="reCaption">Caption <span class="req">Required</span></label><textarea class="input" id="reCaption" rows="4" required spellcheck="true" lang="en-US">${esc(v.caption)}</textarea><div class="check-row"><span></span><button type="button" class="btn ghost" data-act="checkCaption" data-for="reCaption">Check spelling and tone</button></div><div id="reCaptionCheck"></div></div>
         <div class="field"><label for="reMusic">Music <span class="req">Required</span></label><input class="input" id="reMusic" type="url" required placeholder="https://artlist.io/..." value="${esc(v.music)}"><span class="hint">Paste the Artlist link of the track you used.</span></div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
           <button class="btn" data-act="resubmit" data-id="${esc(v.id)}" id="reBtn" disabled>Submit new version</button>
@@ -888,11 +915,70 @@ function renderVideo(id) {
         ${statusCard}
         <section class="card" aria-label="What you submitted" style="display:flex;flex-direction:column;gap:16px">
           <h2 style="font-size:18px">What you submitted</h2>
+          ${v.template ? `<div><div class="kv">Template</div><a href="#/templates">${esc(v.template.name)}</a></div>` : ""}
           <div><div class="kv">Caption</div><div class="pre">${esc(v.caption || "No caption")}</div></div>
           <div><div class="kv">Music</div>${v.music ? `<a href="${esc(v.music)}" target="_blank" rel="noopener">${esc(v.music.replace(/^https?:\/\//, "").slice(0, 60))}</a>` : `<span class="muted">Not added</span>`}</div>
         </section>
       </div>
     </div>`);
+}
+
+/* ---------- templates ---------- */
+function templateCard(t) {
+  const left = t.open == null ? "" : t.full ? "Full for now" : `${plural(t.open, "video", "videos")} still needed`;
+  const part = (label, txt) => (txt ? `<div><div class="kv">${label}</div><div class="pre">${esc(txt)}</div></div>` : "");
+  return `<section class="card tcard${t.full ? " full" : ""}" aria-label="${esc(t.name)}">
+    <div class="top">
+      <div style="min-width:0">
+        <h2 style="font-size:20px;line-height:1.2">${esc(t.name)}</h2>
+        <div class="meta">${levelBadge(t.level)}${t.live === false ? `<span class="badge b-sub" title="Only the NLT team sees this template until it goes live">Team only · testing</span>` : ""}${left ?`<span class="${t.full ? "muted" : "owe"}">${esc(left)}</span>` : ""}</div>
+      </div>
+      <div class="price"><b>${money(payFor(t))}</b><span class="small muted">per approved video</span></div>
+    </div>
+    ${t.example ? `<a class="btn ghost" href="${esc(t.example)}" target="_blank" rel="noopener" style="align-self:flex-start">Watch the example</a>` : ""}
+    ${part("How to build it", t.brief)}
+    ${part("Text on screen", t.textOnScreen)}
+    ${part("Caption", t.caption)}
+    ${part("Music", t.music)}
+    <div class="foot">${t.full ? `<span class="small muted">We have enough of these for now. Pick another template.</span>` : `<a class="btn" href="#/submit/${esc(t.id)}">Use this template</a>`}</div>
+  </section>`;
+}
+
+function renderTemplates() {
+  const list = templates();
+  app.innerHTML = shell("tpl", `
+    <div class="hero">
+      <div>
+        <div class="eyebrow">What to make</div>
+        <h1 class="head">Templates</h1>
+        <p>Video formats that work for NLT. Watch the example, follow the brief, and pick the template when you submit. You can make the same template for several athletes in one go.</p>
+      </div>
+    </div>
+    ${list.length ? `<div class="tgrid">${list.map(templateCard).join("")}</div>`
+      : `<section class="card"><div class="empty" style="padding:4px 0">No templates right now. <a href="#/submit">Submit your own idea</a>.</div></section>`}`);
+}
+
+function tplHint(id) {
+  const t = templates().find((x) => x.id === id);
+  if (t) return `Pays ${money(payFor(t))} once approved.${t.example ? ` <a href="${esc(t.example)}" target="_blank" rel="noopener">Watch the example</a> ·` : ""} <a href="#/templates">Read the brief</a>`;
+  if (id === "own") return `Your own idea pays your rate, ${money(ownRate())}, once approved.`;
+  return `Not sure which one? <a href="#/templates">See the templates</a>.`;
+}
+
+function templatePicker(pre) {
+  const list = templates();
+  if (!list.length) return "";
+  const sel = list.some((t) => t.id === pre && !t.full) || pre === "own" ? pre : "";
+  const opt = (t) => `<option value="${esc(t.id)}"${t.id === sel ? " selected" : ""}${t.full ? " disabled" : ""}>${esc(t.name)}${t.level ? ` · ${esc(t.level)}` : ""} · ${money(payFor(t))}${t.live === false ? " · team only" : ""}${t.full ? " · full" : ""}</option>`;
+  return `<div class="field">
+    <label for="tpl">Template <span class="req">Required</span></label>
+    <select class="input" id="tpl" required>
+      <option value=""${sel ? "" : " selected"} disabled>Choose the template you used</option>
+      ${list.map(opt).join("")}
+      <option value="own"${sel === "own" ? " selected" : ""}>Own idea · ${money(ownRate())}</option>
+    </select>
+    <span class="hint" id="tplHint">${tplHint(sel)}</span>
+  </div>`;
 }
 
 /* ---------- submit page ---------- */
@@ -921,20 +1007,21 @@ function progressBox(name) {
     <div class="progress"><div id="pctBar"></div></div></div></div>`;
 }
 
-function renderSubmit() {
+function renderSubmit(pre = "") {
   state.upload = null;
   app.innerHTML = shell("submit", `
     <div style="display:flex;flex-direction:column;gap:10px">
       <a class="back" href="#/">${ARROW} Back to dashboard</a>
       <h1 class="head" style="margin:0;font-size:40px;line-height:1.05">Submit a video</h1>
-      <p style="margin:0;font-size:16px;color:var(--soft)">Upload your finished cut, then add the caption and the track you used.</p>
+      <p style="margin:0;font-size:16px;color:var(--soft)">${templates().length ? "Pick the template you used, upload" : "Upload"} your finished cut, then add the caption and the track you used.</p>
     </div>
     <section class="card" style="max-width:760px;display:flex;flex-direction:column;gap:22px" aria-label="Video details">
+      ${templatePicker(pre)}
       <div class="field"><span style="font-size:14px;font-weight:700">Video file <span class="req">Required</span></span><div id="drop">${dropzone("file")}</div></div>
       <div class="field"><label for="title">Title <span class="req">Required</span></label><input class="input" id="title" type="text" maxlength="200" required placeholder="e.g. Batch 5 - Reel 3 - Podium Celebration"></div>
       <div class="field">
         <label for="caption">Caption <span class="req">Required</span></label>
-        <textarea class="input" id="caption" rows="5" maxlength="2200" required spellcheck="true" lang="en-GB" placeholder="The caption that goes out with the post"></textarea>
+        <textarea class="input" id="caption" rows="5" maxlength="2200" required spellcheck="true" lang="en-US" placeholder="The caption that goes out with the post"></textarea>
         <div class="check-row"><span class="hint" id="capCount">0 / 2,200 characters</span><button type="button" class="btn ghost" data-act="checkCaption" data-for="caption">Check spelling and tone</button></div>
         <div id="captionCheck"></div>
       </div>
@@ -980,7 +1067,7 @@ function queueRow(v) {
     : `<span class="${waitingCls}">Waiting ${esc(ageLabel(v.submitted))}</span>`;
   return `<a class="vrow" href="#/review/${esc(v.id)}">
     ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
-    <div class="vinfo"><div class="vt">${esc(v.title || "(untitled)")}</div><div class="small muted">${esc(v.editor)} · submitted ${esc(dayLabel(v.submitted))}${ver > 1 ? ` · version ${ver}` : ""}</div><div class="badges m">${statusBadge(v.status)}</div></div>
+    <div class="vinfo"><div class="vt">${esc(v.title || "(untitled)")}</div><div class="small muted">${esc(v.editor)} · submitted ${esc(dayLabel(v.submitted))}${ver > 1 ? ` · version ${ver}` : ""}${v.template ? ` · ${esc(v.template.name)}` : ""}</div><div class="badges m">${statusBadge(v.status)}</div></div>
     <div class="badges d">${statusBadge(v.status)}</div>
     <div class="small" style="min-width:120px;text-align:right">${when}</div>
   </a>`;
@@ -1040,6 +1127,17 @@ function noteList(d) {
   </li>`).join("")}</ul>`;
 }
 
+// The template the editor picked, with its example and brief, so the reviewer can hold the video against it.
+function tplReview(t) {
+  if (!t) return "";
+  const part = (label, txt) => (txt ? `<div class="kv" style="margin-top:10px">${label}</div><div class="pre small">${esc(txt)}</div>` : "");
+  return `<div>
+    <div class="kv">Template</div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px"><b>${esc(t.name)}</b>${levelBadge(t.level)}${t.example ? `<a href="${esc(t.example)}" target="_blank" rel="noopener">Watch the example</a>` : ""}</div>
+    ${t.brief || t.textOnScreen || t.caption || t.music ? `<details class="brief" style="margin-top:8px"><summary>Show the template's brief</summary><div style="margin-top:8px;padding:2px 14px 12px;background:rgba(255,255,255,0.05);border-radius:6px">${part("How to build it", t.brief)}${part("Text on screen", t.textOnScreen)}${part("Caption", t.caption)}${part("Music", t.music)}</div></details>` : ""}
+  </div>`;
+}
+
 function renderReview(id) {
   const v = (state.queue || []).find((x) => x.id === id);
   if (!v) { app.innerHTML = shell("review", `<a class="back" href="#/review">${ARROW} Back to review</a><div class="empty">That video isn't in the review list any more.</div>`); return; }
@@ -1089,7 +1187,8 @@ function renderReview(id) {
         ${decision}
         <section class="card" aria-label="What the editor sent" style="display:flex;flex-direction:column;gap:16px">
           <h2 style="font-size:18px">What ${esc(v.editor.split(" ")[0])} sent</h2>
-          <div><div class="kv">Caption · ${capLen.toLocaleString("en-US")} characters</div><div class="pre">${v.caption ? esc(v.caption) : `<span class="error">No caption</span>`}</div></div>
+          ${tplReview(v.template)}
+          <div><div class="kv">Caption ·${capLen.toLocaleString("en-US")} characters</div><div class="pre">${v.caption ? esc(v.caption) : `<span class="error">No caption</span>`}</div></div>
           <div><div class="kv">Music</div>${v.music ? `<a href="${esc(v.music)}" target="_blank" rel="noopener">${esc(v.music.replace(/^https?:\/\//, "").slice(0, 70))}</a>` : `<span class="error">No music link</span>`}</div>
         </section>
         ${historyHtml(v)}
@@ -1156,6 +1255,7 @@ app.addEventListener("keydown", (e) => {
 });
 
 app.addEventListener("change", (e) => {
+  if (e.target.id === "tpl") document.getElementById("tplHint").innerHTML = tplHint(e.target.value);
   if (e.target.id === "file" && e.target.files[0]) {
     startUpload(e.target.files[0], "drop", (u) => { state.upload = u; document.getElementById("drop").innerHTML = uploadedBox(u, "clearUpload"); });
   }
@@ -1258,13 +1358,16 @@ app.addEventListener("click", async (e) => {
     const fail = (m) => { err.textContent = m; err.classList.remove("hidden"); };
     const caption = document.getElementById("caption").value.trim();
     const music = document.getElementById("music").value.trim();
+    const tplEl = document.getElementById("tpl");
+    const templateId = tplEl ? tplEl.value : "own";
+    if (!templateId) { tplEl.focus(); return fail("Pick the template you used, or Own idea."); }
     if (!state.upload) return fail("Upload the video file first.");
     if (!title) { document.getElementById("title").focus(); return fail("Give the video a title."); }
     if (!caption) { document.getElementById("caption").focus(); return fail("Add the caption."); }
     if (!MUSIC_URL.test(music)) { document.getElementById("music").focus(); return fail("Paste the Artlist link of the track you used."); }
     el.disabled = true; el.textContent = "Submitting…";
     try {
-      await api("submit", { title, videoUrl: state.upload.url, caption, music });
+      await api("submit", { title, videoUrl: state.upload.url, caption, music, templateId });
       state.upload = null;
       await ensureData(true);
       go("#/"); toast("Submitted. It's in your list.");
@@ -1345,8 +1448,22 @@ function mockApi(action, payload) {
       payout(3, [5, 6, 7], "Paid", { note: "First payout under the per-video rate." }),
     ];
     window.__mock.nextPayday = iso(fri);
+    const T = [
+      { id: "recSampleTpl00001", name: "One-shot slow-mo dive", level: "Simple", pay: 3, needed: 10, open: 6, full: false, live: true, example: "https://www.facebook.com/reel/2506444856501817",
+        brief: "1. Pick one take where the athlete already stands at the edge and the height is clear in the first frame. No walk-up, no logo, no title card.\n2. Keep it one continuous shot from take-off to entry.\n3. Slow the fall down so it fills most of the reel. Total length 10 to 15 seconds, so it loops.\n4. After the entry, hold 3 to 4 seconds on the calm water. No end card.\n5. One video per athlete. Write a new line of text for each one.",
+        textOnScreen: "One short line, first person, lowercase. Small white text, centered. Gone before the entry.\nExample: rich because I know what this feels like",
+        caption: "One lowercase line that carries on from the text on screen. No hashtags.\nExample: money will never make you feel so alive", music: "Slow, cinematic track from Artlist (orchestral or piano). Don't cut to the beat." },
+      { id: "recSampleTpl00002", name: "Three-angle podium moment", level: "Advanced", pay: 6, needed: 4, open: 0, full: true, live: true, example: "https://www.instagram.com/reel/Def8YMZhc4_/",
+        brief: "1. Open on the wide shot of the podium.\n2. Cut to the close-up of the winner, then the crowd.\n3. 12 to 18 seconds.", textOnScreen: "", caption: "Short tease, then the athlete's name.\nExample: Maybe the perfect shot does exist…", music: "Upbeat track from Artlist. Cut on the beat." },
+      { id: "recSampleTpl00003", name: "Athlete intro", level: "Simple", pay: null, needed: null, open: null, full: false, live: false, example: "",
+        brief: "1. Best dive of the athlete, one angle.\n2. Name and country on screen in the first second.\n3. 8 to 12 seconds.", textOnScreen: "Name and country, first second only.", caption: "", music: "" },
+    ];
+    // ?tpl=0 shows what an editor sees while no template is live for them.
+    window.__mock.templates = role === "reviewer" || new URLSearchParams(location.search).get("tpl") === "0" ? [] : T;
+    // The latest videos were made from templates.
+    vids.slice(0, 4).forEach((v, i) => { const t = T[i % 2]; v.template = { id: t.id, name: t.name, pay: t.pay }; });
     const eds = ["Ralph Hepollo", "Mark Espejo", "Rian Magtaan"];
-    window.__mockQueue = vids.slice(0, 14).map((v, i) => ({ ...v, id: "recQueue" + String(i).padStart(9, "0"), editor: eds[i % 3],
+    window.__mockQueue = vids.slice(0, 14).map((v, i) => ({ ...v, id: "recQueue" + String(i).padStart(9, "0"), editor: eds[i % 3], template: v.template ? T.find((t) => t.id === v.template.id) : null,
       status: i < 6 ? (i === 1 ? "In Review" : "Submitted") : i < 8 ? "Needs Resubmission" : "Approved",
       reviewed: i >= 6 ? iso(addDays(new Date(), -(i - 5))) : "", reviewedBy: i >= 6 ? "Carlo" : "",
       caption: i === 3 ? "" : "27 metres up, three seconds down, and a podium waiting at the bottom. Men's final at Area 47, Tyrol.",
@@ -1366,7 +1483,11 @@ function mockApi(action, payload) {
     }
     if (action === "review-queue") return { reviewer: window.__mock.reviewer, videos: JSON.parse(JSON.stringify(window.__mockQueue)) };
     if (action === "review") { const v = window.__mockQueue.find((x) => x.id === payload.id); Object.assign(v, { status: payload.decision === "approve" ? "Approved" : "Needs Resubmission", feedback: payload.notes, reviewed: iso(new Date()), reviewedBy: "Sample Reviewer", history: `${iso(new Date())} · Sample Reviewer · ${payload.decision === "approve" ? "Approved" : "Changes requested"}${payload.notes ? "\n" + payload.notes : ""}${v.history ? "\n\n" + v.history : ""}` }); return { ok: true }; }
-    if (action === "submit") { window.__mock.videos.unshift({ id: "recSampleNew" + Date.now(), title: payload.title, status: "Submitted", submitted: iso(new Date()), videoUrl: "", caption: payload.caption, music: payload.music, feedback: "", amount: 8, paid: false }); return { ok: true }; }
+    if (action === "submit") {
+      const t = (window.__mock.templates || []).find((x) => x.id === payload.templateId);
+      window.__mock.videos.unshift({ id: "recSampleNew" + Date.now(), title: payload.title, status: "Submitted", submitted: iso(new Date()), videoUrl: "", caption: payload.caption, music: payload.music, feedback: "", amount: 0, paid: false, template: t ? { id: t.id, name: t.name, pay: t.pay } : null });
+      return { ok: true };
+    }
     if (action === "resubmit") { const v = window.__mock.videos.find((x) => x.id === payload.id); Object.assign(v, { status: "Submitted", feedback: "", caption: payload.caption }); return { ok: true }; }
     return { ok: true };
   });
