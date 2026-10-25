@@ -1,6 +1,8 @@
 // NLT editor portal backend.
 // The browser never sees an Airtable key: every read and write goes through here.
-// Login: email -> 6-digit code by email -> session token (30 days).
+// Login: email -> 6-digit code by email -> session token (30 days). Unknown emails get the same answer
+// as known ones; codes, guesses and requests per IP are capped in Postgres (rate_hit, issue_login_code,
+// try_login_code), so parallel requests can't get past the limits. Inactive editors can't log in.
 // Each editor only ever gets their own videos and payouts, and never any bank or payment-method fields.
 // Reviewers (Reviewers table, Active ticked) get the review queue and can approve or request changes.
 // Caption check: spelling and NLT tone notes from Claude. Suggestions only; it never writes a caption.
@@ -137,13 +139,10 @@ const ALLOWED_ORIGINS = new Set([
   "https://jobs.the-nlt.com",
   ...(Deno.env.get("EXTRA_ORIGINS") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
 ]);
-const CLOUDINARY_VIDEO = /^https:\/\/res\.cloudinary\.com\/os1vbtid\/video\/upload\//;
 const EMAIL_RE = /^[a-z0-9._%+'-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 
 const CODE_TTL_MIN = 10;
 const SESSION_DAYS = 30;
-const MAX_CODES_PER_HOUR = 5;
-const MAX_ATTEMPTS = 5;
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -203,6 +202,40 @@ function clip(value: unknown, max: number): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
+// A video in NLT's own Cloudinary account, or "". Parsed as a URL, so "../" tricks can't point elsewhere.
+function ourVideo(raw: unknown): string {
+  try {
+    const u = new URL(clip(raw, 1000));
+    if (u.protocol !== "https:" || u.hostname !== "res.cloudinary.com" || u.port || u.username || u.password) return "";
+    return u.pathname.startsWith("/os1vbtid/video/upload/") ? u.href : "";
+  } catch {
+    return "";
+  }
+}
+
+// Links we hand to the browser: only http(s), never javascript: or data:.
+function webLink(v: unknown): string {
+  const s = String(v ?? "").trim();
+  return /^https?:\/\//i.test(s) ? s : "";
+}
+
+// The caller's IP as Supabase passes it on. Only used as a rate-limit key.
+function clientIp(req: Request): string {
+  return (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim().slice(0, 64) || "unknown";
+}
+
+// Counts one request against a limit in Postgres; false once the limit is reached.
+async function allow(key: string, window: string, max: number): Promise<boolean> {
+  const { data, error } = await db.rpc("rate_hit", { p_key: key, p_window: window, p_max: max });
+  if (error) {
+    console.error("rate_hit", error);
+    throw new HttpError(500, "Something went wrong. Try again.");
+  }
+  return data === true;
+}
+
+const pause = () => new Promise((r) => setTimeout(r, 700 + Math.random() * 900));
+
 async function airtable(path: string, init: RequestInit = {}) {
   const token = Deno.env.get("AIRTABLE_PORTAL_TOKEN");
   if (!token) throw new HttpError(503, "The portal isn't connected to Airtable yet.");
@@ -228,15 +261,53 @@ function selectName(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-// ---------- editors ----------
+// ---------- who can log in ----------
 
-async function findEditorByEmail(email: string) {
-  // email is validated against EMAIL_RE, so it holds no quotes or braces.
-  const formula = encodeURIComponent(`LOWER(TRIM({Email}))="${email}"`);
-  const fields = [E.name, E.email, E.status].map((f) => `fields[]=${f}`).join("&");
-  const data = await airtable(`${T_EDITORS}?filterByFormula=${formula}&${fields}&returnFieldsByFieldId=true&maxRecords=1`);
-  return data.records?.[0] ?? null;
+// Editors and active reviewers by email, cached for a minute, so login requests (including ones for
+// unknown emails) don't each cost Airtable calls.
+type Person = { id: string; name: string; active: boolean };
+let dirCache: { at: number; editors: Map<string, Person>; reviewers: Map<string, Person> } | null = null;
+
+async function directory() {
+  if (dirCache && Date.now() - dirCache.at < 60_000) return dirCache;
+  const editors = new Map<string, Person>();
+  const reviewers = new Map<string, Person>();
+  let offset = "";
+  do {
+    const fields = [E.name, E.email, E.status].map((f) => `fields[]=${f}`).join("&");
+    const data = await airtable(`${T_EDITORS}?${fields}&returnFieldsByFieldId=true&pageSize=100${offset ? `&offset=${offset}` : ""}`);
+    for (const r of data.records ?? []) {
+      const email = String(r.fields?.[E.email] ?? "").trim().toLowerCase();
+      const p = { id: r.id as string, name: String(r.fields?.[E.name] ?? ""), active: selectName(r.fields?.[E.status]) === "Active" };
+      // If two rows share an email, the active one wins.
+      if (email && (!editors.has(email) || (p.active && !editors.get(email)!.active))) editors.set(email, p);
+    }
+    offset = data.offset ?? "";
+  } while (offset);
+  offset = "";
+  do {
+    const fields = [R.name, R.email, R.active].map((f) => `fields[]=${f}`).join("&");
+    const data = await airtable(`${T_REVIEWERS}?${fields}&returnFieldsByFieldId=true&pageSize=100${offset ? `&offset=${offset}` : ""}`);
+    for (const r of data.records ?? []) {
+      const email = String(r.fields?.[R.email] ?? "").trim().toLowerCase();
+      if (email && r.fields?.[R.active] === true) reviewers.set(email, { id: r.id as string, name: String(r.fields?.[R.name] ?? ""), active: true });
+    }
+    offset = data.offset ?? "";
+  } while (offset);
+  dirCache = { at: Date.now(), editors, reviewers };
+  return dirCache;
 }
+
+// What an email can log in as. Inactive editors can't log in as editors, except team members
+// (anyone in Reviewers), so their test logins keep working.
+async function rolesFor(email: string) {
+  const d = await directory();
+  const reviewer = d.reviewers.get(email) ?? null;
+  const ed = d.editors.get(email) ?? null;
+  return { editor: ed && (ed.active || reviewer) ? ed : null, reviewer };
+}
+
+// ---------- editors ----------
 
 async function getEditor(id: string) {
   const fields = [E.name, E.email, E.status, E.rate, E.payModel, E.videos, E.payouts].map((f) => `fields[]=${f}`).join("&");
@@ -384,13 +455,6 @@ function templateOf(f: Record<string, unknown>, templates: Map<string, Template>
 
 // ---------- reviewers ----------
 
-async function findReviewerByEmail(email: string) {
-  const formula = encodeURIComponent(`AND(LOWER(TRIM({Email}))="${email}",{Active})`);
-  const fields = [R.name, R.email, R.active].map((f) => `fields[]=${f}`).join("&");
-  const data = await airtable(`${T_REVIEWERS}?filterByFormula=${formula}&${fields}&returnFieldsByFieldId=true&maxRecords=1`);
-  return data.records?.[0] ?? null;
-}
-
 // Returns the reviewer if they are still Active, otherwise null.
 async function activeReviewer(id: string) {
   const formula = encodeURIComponent(`RECORD_ID()="${id}"`);
@@ -432,7 +496,7 @@ function shapeVideo(rec: { id: string; fields: Record<string, unknown> }, templa
     reviewed: String(f[V.reviewed] ?? ""),
     videoUrl: /^https:\/\//.test(link) ? link : "",
     caption: String(f[V.caption] ?? ""),
-    music: String(f[V.music] ?? ""),
+    music: webLink(f[V.music]),
     feedback: String(f[V.notes] ?? ""),
     amount: payoutNumber(f[V.payout]),
     paid: f[V.paid] === true,
@@ -488,21 +552,24 @@ async function sendCodeEmail(to: string, name: string, code: string) {
 
 // ---------- actions ----------
 
-async function requestCode(body: Record<string, unknown>) {
+async function requestCode(req: Request, body: Record<string, unknown>) {
   const email = normaliseEmail(body.email);
-  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const { count } = await db.from("login_codes").select("id", { count: "exact", head: true })
-    .eq("email", email).gte("created_at", since);
-  if ((count ?? 0) >= MAX_CODES_PER_HOUR) throw new HttpError(429, "Too many codes requested. Wait an hour, then try again.");
+  if (!await allow(`code-ip:${clientIp(req)}`, "1 hour", 20)) throw new HttpError(429, "Too many login attempts from here. Wait an hour, then try again.");
 
-  const [editor, reviewer] = await Promise.all([findEditorByEmail(email), findReviewerByEmail(email)]);
-  if (!editor && !reviewer) throw new HttpError(404, "That email isn't on the editor or reviewer list. Check with Raphael if you think this is wrong.");
-  const person = String(editor?.fields?.[E.name] ?? reviewer?.fields?.[R.name] ?? "");
+  const { editor, reviewer } = await rolesFor(email);
+  // Same answer whether or not the email is on the list, so nobody can find out who works with NLT.
+  if (!editor && !reviewer) {
+    await pause();
+    return { ok: true };
+  }
+  const person = editor?.name || reviewer?.name || "";
 
+  // At most 5 codes an hour and 10 a day per email, counted atomically in Postgres.
   const code = randomCode();
   const expires = new Date(Date.now() + CODE_TTL_MIN * 60 * 1000).toISOString();
-  const { error } = await db.from("login_codes").insert({ email, code_hash: await sha256(`${email}:${code}`), expires_at: expires });
+  const { data: issued, error } = await db.rpc("issue_login_code", { p_email: email, p_hash: await sha256(`${email}:${code}`), p_expires: expires });
   if (error) throw new HttpError(500, "Something went wrong. Try again.");
+  if (issued !== true) throw new HttpError(429, "Too many codes requested. Wait an hour, then try again.");
   try {
     await sendCodeEmail(email, person, code);
   } catch (e) {
@@ -513,22 +580,21 @@ async function requestCode(body: Record<string, unknown>) {
   return { ok: true };
 }
 
-async function verifyCode(body: Record<string, unknown>) {
+async function verifyCode(req: Request, body: Record<string, unknown>) {
   const email = normaliseEmail(body.email);
   const code = String(body.code ?? "").replace(/\D/g, "");
   if (code.length !== 6) throw new HttpError(400, "Enter the 6-digit code from the email.");
+  if (!await allow(`verify-ip:${clientIp(req)}`, "1 hour", 30)) throw new HttpError(429, "Too many tries from here. Wait an hour, then try again.");
 
-  const { data: row } = await db.from("login_codes").select("id, code_hash, attempts, expires_at")
-    .eq("email", email).order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (!row || new Date(row.expires_at) < new Date()) throw new HttpError(400, "That code has expired. Ask for a new one.");
-  if (row.attempts >= MAX_ATTEMPTS) throw new HttpError(429, "Too many wrong codes. Ask for a new one.");
-  if (row.code_hash !== await sha256(`${email}:${code}`)) {
-    await db.from("login_codes").update({ attempts: row.attempts + 1 }).eq("id", row.id);
-    throw new HttpError(400, "That code didn't work. Check the email and try again.");
-  }
+  // Counts the try before comparing, atomically: at most 5 tries per code, even in parallel.
+  const { data: rows, error: tryError } = await db.rpc("try_login_code", { p_email: email });
+  if (tryError) throw new HttpError(500, "Something went wrong. Try again.");
+  const row = (rows as { code_id: number; code_hash: string }[] | null)?.[0];
+  if (!row) throw new HttpError(400, "That code has expired or was tried too often. Ask for a new one.");
+  if (row.code_hash !== await sha256(`${email}:${code}`)) throw new HttpError(400, "That code didn't work. Check the email and try again.");
   await db.from("login_codes").delete().eq("email", email);
 
-  const [editor, reviewer] = await Promise.all([findEditorByEmail(email), findReviewerByEmail(email)]);
+  const { editor, reviewer } = await rolesFor(email);
   if (!editor && !reviewer) throw new HttpError(404, "That email isn't on the editor or reviewer list.");
   const token = randomToken();
   const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -547,17 +613,19 @@ async function dashboard(req: Request) {
   const s = await sessionFrom(req);
   // Someone added to Reviewers after logging in gets review access without logging in again.
   if (!s.reviewerId) {
-    const r = await findReviewerByEmail(s.email);
+    const { reviewer: r } = await rolesFor(s.email);
     if (r) {
-      s.reviewerId = r.id as string;
+      s.reviewerId = r.id;
       await db.from("sessions").update({ reviewer_id: s.reviewerId }).eq("token_hash", await sha256(s.token));
     }
   }
-  const [ed, reviewer] = await Promise.all([
+  const [edRec, reviewer] = await Promise.all([
     s.editorId ? getEditor(s.editorId) : Promise.resolve(null),
     s.reviewerId ? activeReviewer(s.reviewerId) : Promise.resolve(null),
   ]);
-  if (!ed && !reviewer) throw new HttpError(401, "Your session has ended. Log in again.");
+  // An editor set to Inactive loses access straight away (team test logins excepted).
+  const ed = edRec && (selectName(edRec.fields?.[E.status]) === "Active" || reviewer) ? edRec : null;
+  if (!ed && !reviewer) throw new HttpError(401, "Your access to the portal has ended. Check with Raphael.");
   let editor = null;
   let videos: ReturnType<typeof shapeVideo>[] = [];
   let payouts: ReturnType<typeof shapePayout>[] = [];
@@ -595,8 +663,13 @@ async function dashboard(req: Request) {
   };
 }
 
-function requireEditor(s: { editorId: string | null }): string {
+// Only active editors (or team members on their test logins) can submit.
+async function requireEditor(s: { editorId: string | null; reviewerId: string | null }): Promise<string> {
   if (!s.editorId) throw new HttpError(403, "Only editors can submit videos.");
+  const ed = await getEditor(s.editorId);
+  if (selectName(ed.fields?.[E.status]) !== "Active" && !(s.reviewerId && await activeReviewer(s.reviewerId))) {
+    throw new HttpError(403, "Your editor access has ended. Check with Raphael.");
+  }
   return s.editorId;
 }
 
@@ -610,10 +683,10 @@ function requiredSubmission(body: Record<string, unknown>) {
 
 async function submit(req: Request, body: Record<string, unknown>) {
   const s = await sessionFrom(req);
-  const editorId = requireEditor(s);
+  const editorId = await requireEditor(s);
   const title = clip(body.title, 200);
-  const videoUrl = clip(body.videoUrl, 1000);
-  if (!CLOUDINARY_VIDEO.test(videoUrl)) throw new HttpError(400, "Upload the video file first.");
+  const videoUrl = ourVideo(body.videoUrl);
+  if (!videoUrl) throw new HttpError(400, "Upload the video file first.");
   if (!title) throw new HttpError(400, "Give the video a title.");
   const { caption, music } = requiredSubmission(body);
   const templateId = await pickTemplate(body.templateId, s);
@@ -633,11 +706,11 @@ async function submit(req: Request, body: Record<string, unknown>) {
 
 async function resubmit(req: Request, body: Record<string, unknown>) {
   const s = await sessionFrom(req);
-  const editorId = requireEditor(s);
+  const editorId = await requireEditor(s);
   const id = clip(body.id, 20);
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new HttpError(400, "Unknown video.");
-  const videoUrl = clip(body.videoUrl, 1000);
-  if (!CLOUDINARY_VIDEO.test(videoUrl)) throw new HttpError(400, "Upload the new video file first.");
+  const videoUrl = ourVideo(body.videoUrl);
+  if (!videoUrl) throw new HttpError(400, "Upload the new video file first.");
   const { caption, music } = requiredSubmission(body);
 
   const [rec] = await getVideos([id]) as { id: string; fields: Record<string, unknown> }[];
@@ -697,7 +770,7 @@ async function reviewQueue(req: Request) {
       reviewed: String(f[V.reviewed] ?? ""),
       videoUrl: /^https:\/\//.test(link) ? link : "",
       caption: String(f[V.caption] ?? ""),
-      music: String(f[V.music] ?? ""),
+      music: webLink(f[V.music]),
       feedback: String(f[V.notes] ?? ""),
       reviewedBy: String(f[V.reviewedBy] ?? ""),
       history: String(f[V.history] ?? ""),
@@ -774,11 +847,7 @@ async function checkCaption(req: Request, body: Record<string, unknown>) {
   if (!key) throw new HttpError(503, "The caption check isn't switched on yet.");
 
   const who = s.editorId ?? s.reviewerId ?? s.email;
-  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const { count } = await db.from("caption_checks").select("id", { count: "exact", head: true })
-    .eq("who", who).gte("created_at", since);
-  if ((count ?? 0) >= CHECKS_PER_HOUR) throw new HttpError(429, "That's a lot of checks for one hour. Wait a bit, then check again.");
-  await db.from("caption_checks").insert({ who });
+  if (!await allow(`caption:${who}`, "1 hour", CHECKS_PER_HOUR)) throw new HttpError(429, "That's a lot of checks for one hour. Wait a bit, then check again.");
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30000);
@@ -833,8 +902,8 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     switch (body.action) {
-      case "request-code": return json(await requestCode(body), 200, origin);
-      case "verify-code": return json(await verifyCode(body), 200, origin);
+      case "request-code": return json(await requestCode(req, body), 200, origin);
+      case "verify-code": return json(await verifyCode(req, body), 200, origin);
       case "dashboard": return json(await dashboard(req), 200, origin);
       case "submit": return json(await submit(req, body), 200, origin);
       case "resubmit": return json(await resubmit(req, body), 200, origin);
@@ -842,7 +911,7 @@ Deno.serve(async (req) => {
       case "review": return json(await review(req, body), 200, origin);
       case "check-caption": return json(await checkCaption(req, body), 200, origin);
       case "logout": return json(await logout(req), 200, origin);
-      case "ping": return json({ ok: true, airtable: !!Deno.env.get("AIRTABLE_PORTAL_TOKEN"), mail: !!Deno.env.get("MAIL_APP_PASSWORD"), checker: !!Deno.env.get("ANTHROPIC_API_KEY") }, 200, origin);
+      case "ping": return json({ ok: true }, 200, origin);
       default: return json({ error: "Unknown action." }, 400, origin);
     }
   } catch (e) {
