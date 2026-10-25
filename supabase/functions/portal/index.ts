@@ -4,6 +4,7 @@
 // Each editor only ever gets their own videos and payouts, and never any bank or payment-method fields.
 // Reviewers (Reviewers table, Active ticked) get the review queue and can approve or request changes.
 // Caption check: spelling and NLT tone notes from Claude. Suggestions only; it never writes a caption.
+// Templates: editors see the Active rows of the Templates table and pick one when they submit.
 // Payouts: every second Friday the Airtable "Pay run" automation creates one Payouts row per editor
 // (USD total, USD→PHP rate, pesos sent). Editors see them on the Payments page.
 
@@ -18,6 +19,23 @@ const T_PAYOUTS = "tblU046MpsrNhN1Sd";
 // Caption Examples: rows with "Use in checker" ticked are the examples the caption check judges against.
 const T_CAPTIONS = "tbllar9yr94bmdzi4";
 const CX = { caption: "fldNGy7VRCQ1XFR6M", why: "fldN5j0BDHvDxiWTW", use: "fldGm9qF4fxHHgapU" };
+// Templates: Active rows are shown to editors, who pick one when they submit.
+// A video made with a template pays the template's Pay once approved (Payout formula in Airtable).
+// The internal Best Practices link is never read here.
+const T_TEMPLATES = "tblgOYxWHFZ4peswS";
+const TP = {
+  name: "fldkzD6rI2M5xBFCt",
+  level: "fld1HGnsTF9lzapMy",
+  pay: "fldqdIvNapqByt6bo",
+  needed: "fldsaneZRYbFT9CyS",
+  open: "fldRndMphlqLzqaa7",
+  example: "fldjNxAFSescaDwbc",
+  brief: "fldBTGYMukYotyruJ",
+  text: "fld8tcWoJB4QSbwMu",
+  caption: "fldlx6p6Oe9H8iBk8",
+  music: "fldduTsffgEdHDsSk",
+  active: "fldzWMkpVMi2E94hD",
+};
 // Paydays are every second Friday from this date. Keep in step with PAY_ANCHOR in the Airtable "Pay run" script.
 const PAY_ANCHOR = "2026-10-23";
 
@@ -61,6 +79,7 @@ const V = {
   posted: "fldNaAVRjB5BfCR23",
   reviewedBy: "fldeWUK7NvZf4WPgh",
   history: "fldlI5mW1Hv3SHPDb",
+  template: "fldnRWL6CYJ29T1kD",
 };
 const R = {
   name: "fldgefYb3VGVGtecX",
@@ -294,6 +313,67 @@ function nextPayday(): string {
   return new Date((day(PAY_ANCHOR) + add) * 86400000).toISOString().slice(0, 10);
 }
 
+// ---------- templates ----------
+
+function shapeTemplate(rec: { id: string; fields: Record<string, unknown> }) {
+  const f = rec.fields;
+  const example = String(f[TP.example] ?? "");
+  const open = num(f[TP.open]);
+  return {
+    id: rec.id,
+    name: String(f[TP.name] ?? "").trim() || "Template",
+    level: selectName(f[TP.level]),
+    pay: num(f[TP.pay]),
+    needed: num(f[TP.needed]),
+    open,
+    full: open !== null && open <= 0,
+    example: /^https:\/\//.test(example) ? example : "",
+    brief: String(f[TP.brief] ?? ""),
+    textOnScreen: String(f[TP.text] ?? ""),
+    caption: String(f[TP.caption] ?? ""),
+    music: String(f[TP.music] ?? ""),
+    active: f[TP.active] === true,
+  };
+}
+type Template = ReturnType<typeof shapeTemplate>;
+
+// Every template, active or not, so older videos still show their template's name.
+async function getTemplates(): Promise<Template[]> {
+  const out: Template[] = [];
+  const fields = Object.values(TP).map((f) => `fields[]=${f}`).join("&");
+  let offset = "";
+  do {
+    const data = await airtable(`${T_TEMPLATES}?${fields}&returnFieldsByFieldId=true&pageSize=100${offset ? `&offset=${offset}` : ""}`);
+    for (const r of data.records ?? []) out.push(shapeTemplate(r));
+    offset = data.offset ?? "";
+  } while (offset);
+  // Simple before Advanced, open before full.
+  const rank = (t: Template) => (t.full ? 2 : 0) + (t.level === "Advanced" ? 1 : 0);
+  return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+// What editors see of a template.
+function editorTemplate(t: Template) {
+  const { active: _active, ...rest } = t;
+  return rest;
+}
+
+// "" or "own" means the editor's own idea. Anything else must be an active template that isn't full.
+async function pickTemplate(raw: unknown): Promise<string | null> {
+  const id = clip(raw, 20);
+  if (!id || id === "own") return null;
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new HttpError(400, "Pick a template from the list.");
+  const t = (await getTemplates()).find((x) => x.id === id);
+  if (!t || !t.active) throw new HttpError(400, "That template isn't available any more. Pick another one.");
+  if (t.full) throw new HttpError(409, `We have enough "${t.name}" videos for now. Pick another template.`);
+  return t.id;
+}
+
+function templateOf(f: Record<string, unknown>, templates: Map<string, Template>) {
+  const id = ((f[V.template] as string[] | undefined) ?? [])[0];
+  return id ? templates.get(id) ?? null : null;
+}
+
 // ---------- reviewers ----------
 
 async function findReviewerByEmail(email: string) {
@@ -331,10 +411,12 @@ async function editorNames(): Promise<Map<string, string>> {
   return names;
 }
 
-function shapeVideo(rec: { id: string; fields: Record<string, unknown> }) {
+function shapeVideo(rec: { id: string; fields: Record<string, unknown> }, templates: Map<string, Template> = new Map()) {
   const f = rec.fields;
   const link = String(f[V.link] ?? "");
+  const t = templateOf(f, templates);
   return {
+    template: t ? { id: t.id, name: t.name, pay: t.pay } : null,
     id: rec.id,
     title: String(f[V.title] ?? ""),
     status: selectName(f[V.status]) || "Submitted",
@@ -471,15 +553,19 @@ async function dashboard(req: Request) {
   let editor = null;
   let videos: ReturnType<typeof shapeVideo>[] = [];
   let payouts: ReturnType<typeof shapePayout>[] = [];
+  let templates: ReturnType<typeof editorTemplate>[] = [];
   if (ed) {
     const ids = (ed.fields?.[E.videos] as string[] | undefined) ?? [];
     const payoutIds = (ed.fields?.[E.payouts] as string[] | undefined) ?? [];
-    // A payouts hiccup must never stop editors from seeing and submitting videos.
-    const [vrecs, precs] = await Promise.all([
+    // A payouts or templates hiccup must never stop editors from seeing and submitting videos.
+    const [vrecs, precs, tlist] = await Promise.all([
       getVideos(ids),
       getPayouts(payoutIds).catch((e) => { console.error("payouts", e); return []; }),
+      getTemplates().catch((e) => { console.error("templates", e); return [] as Template[]; }),
     ]);
-    videos = vrecs.map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }))
+    const tmap = new Map(tlist.map((t) => [t.id, t]));
+    templates = tlist.filter((t) => t.active).map(editorTemplate);
+    videos = vrecs.map((r) => shapeVideo(r as { id: string; fields: Record<string, unknown> }, tmap))
       .sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
     payouts = precs.map(shapePayout).sort((a, b) => (b.payDate || "").localeCompare(a.payDate || ""));
     const name = String(ed.fields?.[E.name] ?? "");
@@ -496,6 +582,7 @@ async function dashboard(req: Request) {
     reviewer: reviewer ? { name: reviewer.name, firstName: reviewer.name.split(" ")[0] || reviewer.name, email: s.email } : null,
     videos,
     payouts,
+    templates,
     nextPayday: nextPayday(),
   };
 }
@@ -521,6 +608,7 @@ async function submit(req: Request, body: Record<string, unknown>) {
   if (!CLOUDINARY_VIDEO.test(videoUrl)) throw new HttpError(400, "Upload the video file first.");
   if (!title) throw new HttpError(400, "Give the video a title.");
   const { caption, music } = requiredSubmission(body);
+  const templateId = await pickTemplate(body.templateId);
   const fields: Record<string, unknown> = {
     [V.title]: title,
     [V.editor]: [editorId],
@@ -530,6 +618,7 @@ async function submit(req: Request, body: Record<string, unknown>) {
     [V.status]: "Submitted",
     [V.submitted]: viennaToday(),
   };
+  if (templateId) fields[V.template] = [templateId];
   const data = await airtable(T_VIDEOS, { method: "POST", body: JSON.stringify({ records: [{ fields }], typecast: true }) });
   return { id: data.records?.[0]?.id };
 }
@@ -571,7 +660,7 @@ const QUEUE_FORMULA = `OR({Status}="Submitted",{Status}="In Review",{Status}="Ne
 async function reviewQueue(req: Request) {
   const s = await sessionFrom(req);
   const reviewer = await requireReviewer(s);
-  const fields = [V.title, V.editor, V.caption, V.status, V.notes, V.submitted, V.reviewed, V.link, V.music, V.reviewedBy, V.history]
+  const fields = [V.title, V.editor, V.caption, V.status, V.notes, V.submitted, V.reviewed, V.link, V.music, V.reviewedBy, V.history, V.template]
     .map((f) => `fields[]=${f}`).join("&");
   const recs: { id: string; fields: Record<string, unknown> }[] = [];
   let offset = "";
@@ -580,12 +669,18 @@ async function reviewQueue(req: Request) {
     recs.push(...(data.records ?? []));
     offset = data.offset ?? "";
   } while (offset && recs.length < 500);
-  const names = await editorNames();
+  const [names, tlist] = await Promise.all([
+    editorNames(),
+    getTemplates().catch((e) => { console.error("templates", e); return [] as Template[]; }),
+  ]);
+  const tmap = new Map(tlist.map((t) => [t.id, t]));
   const videos = recs.map((r) => {
     const f = r.fields;
     const link = String(f[V.link] ?? "");
     const editorName = ((f[V.editor] as string[] | undefined) ?? []).map((id) => names.get(id) ?? "").filter(Boolean).join(", ");
+    const t = templateOf(f, tmap);
     return {
+      template: t ? editorTemplate(t) : null,
       id: r.id,
       title: String(f[V.title] ?? ""),
       editor: editorName || "Unknown editor",
