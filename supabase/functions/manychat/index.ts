@@ -35,7 +35,7 @@ async function allow(key: string, window: string, max: number) {
 
 type Contact = {
   first_name?: string; last_name?: string; email?: string; optin_email?: boolean; ig_username?: string;
-  ig_id?: unknown; last_interaction?: string | null; ig_last_interaction?: string | null;
+  ig_id?: unknown; last_interaction?: string | null; ig_last_interaction?: string | null; last_input_text?: string | null;
   custom_fields?: { name?: string; value?: unknown }[]; tags?: { name?: string }[];
 };
 
@@ -65,7 +65,9 @@ async function manychatContact(id: string): Promise<Contact> {
   return body.data;
 }
 
-// ManyChat's own Email field, or a custom field with "mail" in its name if the flow saved it there.
+// ManyChat's own Email field, a custom field with "mail" in its name if the flow saved it there, or an address
+// in the fan's last message (fans who answer the welcome DM with their email straight away, e.g. on Instagram
+// on a computer, where the "I'm in!" button doesn't show).
 function emailOf(c: Contact): string {
   const sys = clip(c.email, 254).toLowerCase();
   if (EMAIL_RE.test(sys)) return sys;
@@ -73,7 +75,9 @@ function emailOf(c: Contact): string {
     const v = clip(f?.value, 254).toLowerCase();
     if (/mail/i.test(String(f?.name ?? "")) && EMAIL_RE.test(v)) return v;
   }
-  return "";
+  const typed = clip(c.last_input_text, 500).match(/[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[a-z]{2,}/i)?.[0] ?? "";
+  const cleaned = typed.replace(/[.!?]+$/, "").toLowerCase();
+  return EMAIL_RE.test(cleaned) ? cleaned.slice(0, 254) : "";
 }
 
 // Adds or updates the fan in Mailchimp. Returns Mailchimp's status, or null when Mailchimp isn't connected.
