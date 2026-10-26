@@ -1359,6 +1359,13 @@ async function refreshPubler(force = false) {
       const { error } = await db.from("publer_posts").upsert(unique.slice(i, i + 200));
       if (error) { console.error("publer_posts upsert", error); throw new HttpError(500, "Couldn't save the numbers. Try again."); }
     }
+    // Today's count per post (Vienna day; the last refresh of the day wins), so a day's new views can be told apart.
+    const day = viennaParts(Date.now()).date;
+    const snaps = unique.map((r) => ({ post_id: r.id, account_id: r.account_id, network: r.network, day, views: r.views, reach: r.reach, fetched_at: new Date().toISOString() }));
+    for (let i = 0; i < snaps.length; i += 200) {
+      const { error } = await db.from("publer_post_days").upsert(snaps.slice(i, i + 200));
+      if (error) { console.error("publer_post_days upsert", error); break; }
+    }
     await setState("publer_refreshed", { posts: unique.length, accounts: accounts.length, failed });
   })().finally(() => { refreshing = null; });
   return refreshing;
@@ -1491,9 +1498,72 @@ async function followerStats(network: string) {
     now, change7: sumOver(t0 - 6, t0), change28: sumOver(t0 - 27, t0),
     firstDay: rows.map((r) => String(r.day).slice(0, 10)).sort()[0],
     days, weeks,
-    // New followers on the day a post went out and the day after, on that post's accounts.
-    gain: (accs: string[], day: string) => sumOver(dayNum(day), dayNum(day) + 1, accs.filter((a) => byAcc.has(a))),
+    accounts: [...byAcc.keys()],
+    changeOn,
   };
+}
+
+// Who brought the new followers. On a day an account gained followers, the gain goes to that account's posts in
+// proportion to the views they got that day and the day before (Publer's follower count trails by about a day),
+// whenever they were posted. A hand-set credit (follower_credits) wins for its day. Days we can't tell
+// (no view counts per post yet for that account) stay unassigned.
+async function followerCredits(fol: NonNullable<Awaited<ReturnType<typeof followerStats>>>, network: string, posts: PostRow[]) {
+  const today = dayNum(viennaParts(Date.now()).date);
+  const from = isoOfDay(today - 62);
+  let q = db.from("publer_post_days").select("post_id, account_id, day, views, reach").gte("day", from);
+  if (network !== "all") q = q.eq("network", network);
+  const [snapRes, manualRes] = await Promise.all([q.limit(20000), db.from("follower_credits").select("account_id, day, post_id").gte("day", from)]);
+  if (snapRes.error) console.error("publer_post_days read", snapRes.error);
+  if (manualRes.error) console.error("follower_credits read", manualRes.error);
+  const published = new Map(posts.map((p) => [p.id, dayNum(viennaParts(Date.parse(p.published_at)).date)]));
+  const snaps = new Map<string, { account: string; byDay: Map<number, number> }>();
+  const firstSnap = new Map<string, number>();
+  for (const r of (snapRes.data ?? []) as { post_id: string; account_id: string; day: string; views: number | null; reach: number | null }[]) {
+    const v = r.views ?? r.reach;
+    if (v === null || v === undefined) continue;
+    const d = dayNum(String(r.day).slice(0, 10));
+    let sp = snaps.get(r.post_id);
+    if (!sp) { sp = { account: r.account_id, byDay: new Map() }; snaps.set(r.post_id, sp); }
+    sp.byDay.set(d, v);
+    firstSnap.set(r.account_id, Math.min(firstSnap.get(r.account_id) ?? d, d));
+  }
+  const gainOn = (id: string, sp: { byDay: Map<number, number> }, d: number): number | null => {
+    const now = sp.byDay.get(d);
+    if (now === undefined) return null;
+    const before = sp.byDay.get(d - 1);
+    if (before !== undefined) return Math.max(0, now - before);
+    const pub = published.get(id);
+    return pub !== undefined && pub >= d - 1 ? now : null; // new post: all its views are new
+  };
+  const manual = new Map<string, string[]>();
+  for (const m of (manualRes.data ?? []) as { account_id: string; day: string; post_id: string }[]) {
+    const k = `${m.account_id}|${String(m.day).slice(0, 10)}`;
+    manual.set(k, [...(manual.get(k) ?? []), m.post_id]);
+  }
+  const credits = new Map<string, { followers: number; days: string[] }>();
+  const give = (id: string, n: number, day: string) => {
+    const c = credits.get(id) ?? { followers: 0, days: [] };
+    c.followers += n;
+    if (!c.days.includes(day)) c.days.push(day);
+    credits.set(id, c);
+  };
+  for (const acc of fol.accounts) {
+    const accPosts = [...snaps.entries()].filter(([, sp]) => sp.account === acc);
+    for (let d = today - 60; d <= today; d++) {
+      const day = isoOfDay(d);
+      const c = fol.changeOn(day, [acc]);
+      if (c === null || c <= 0) continue;
+      const man = manual.get(`${acc}|${day}`);
+      if (man?.length) { for (const id of man) give(id, c / man.length, day); continue; }
+      // Every post needs a count from two days before, or the day can't be split fairly.
+      if ((firstSnap.get(acc) ?? Infinity) > d - 2) continue;
+      const gains = accPosts.map(([id, sp]) => ({ id, g: (gainOn(id, sp, d - 1) ?? 0) + (gainOn(id, sp, d) ?? 0) })).filter((x) => x.g > 0);
+      const total = gains.reduce((t, x) => t + x.g, 0);
+      if (!total) continue;
+      for (const x of gains) give(x.id, (c * x.g) / total, day);
+    }
+  }
+  return credits;
 }
 
 const firstLineOf = (s: string) => (String(s || "").split("\n").map((x) => x.trim()).find(Boolean) ?? "").slice(0, 140);
@@ -1574,19 +1644,20 @@ async function insights(req: Request, body: Record<string, unknown>) {
     return { id, name: g.name, level: g.level, pay: g.pay, posts: g.values.length, typical, shares1k: per1k(g.shares, g.views), costPer1k: g.pay != null && typical ? Math.round((g.pay / typical) * 100000) / 100 : null };
   }).sort((a, b) => (b.typical ?? 0) - (a.typical ?? 0));
 
-  // Posts after which the most people followed (posting day and the day after).
+  // Posts that brought the most new followers (credited by the views they got on the days followers came in).
   let followers = null;
   if (fol) {
-    const accsOf = (p: PostRow | Cluster) => ("members" in p ? p.members : [p]).map((m) => m.account_id).filter(Boolean);
-    const windowOf = (p: PostRow | Cluster) => dayNum(dayOf(p));
-    const recent = counted.filter((p) => dayOf(p) > since(60));
-    const withGain = recent.map((p) => ({ p, gain: fol.gain(accsOf(p), dayOf(p)) })).filter((x) => x.gain !== null) as { p: PostRow | Cluster; gain: number }[];
-    const top = withGain.sort((a, b) => b.gain - a.gain).slice(0, 8).map(({ p, gain }) => ({
-      ...describe(p), followers: gain,
-      // Other posts on the same accounts in the same two days share these followers.
-      shared: recent.filter((o) => o !== p && Math.abs(windowOf(o) - windowOf(p)) <= 1 && accsOf(o).some((a) => accsOf(p).includes(a))).length,
-    }));
-    followers = { now: fol.now, change7: fol.change7, change28: fol.change28, firstDay: fol.firstDay, days: fol.days, weeks: fol.weeks, top };
+    const credits = await followerCredits(fol, network, raw).catch((e) => { console.error("follower credits", e); return new Map<string, { followers: number; days: string[] }>(); });
+    const creditOf = (p: PostRow | Cluster) => {
+      let n = 0; const days = new Set<string>();
+      for (const m of "members" in p ? p.members : [p]) { const c = credits.get(m.id); if (c) { n += c.followers; c.days.forEach((x) => days.add(x)); } }
+      return { n: Math.round(n), days: [...days].sort() };
+    };
+    const top = posts.map((p) => ({ p, c: creditOf(p) })).filter((x) => x.c.n > 0).sort((a, b) => b.c.n - a.c.n).slice(0, 8)
+      .map(({ p, c }) => ({ ...describe(p), followers: c.n, followerDays: c.days }));
+    const snapStart = await db.from("publer_post_days").select("day").order("day", { ascending: true }).limit(1);
+    followers = { now: fol.now, change7: fol.change7, change28: fol.change28, firstDay: fol.firstDay, days: fol.days, weeks: fol.weeks, top,
+      perPostFrom: (snapStart.data?.[0] as { day?: string } | undefined)?.day ?? null };
   }
 
   const thisWeek = weeks[11], lastWeek = weeks[10];
@@ -1766,6 +1837,8 @@ Deno.serve(async (req) => {
       case "insights": return json(await insights(req, body), 200, origin);
       case "team-templates": return json(await teamTemplates(req), 200, origin);
       case "template-save": return json(await templateSave(req, body), 200, origin);
+      // Safe to call from anywhere: refreshes Publer's numbers at most every 3 hours and returns nothing.
+      case "refresh-stats": await refreshPubler(false).catch((e) => console.error("scheduled refresh", e)); return json({ ok: true }, 200, origin);
       case "logout": return json(await logout(req), 200, origin);
       case "ping": return json({ ok: true }, 200, origin);
       default: return json({ error: "Unknown action." }, 400, origin);
