@@ -5,9 +5,12 @@
 // (MANYCHAT_API_KEY secret), so calling this URL can't add made-up addresses.
 // Works the same for Instagram and Facebook Messenger contacts.
 // Each fan is saved in Postgres (fans). When MAILCHIMP_API_KEY is set, they're also added to the Mailchimp
-// audience with the tag "Instagram DM" or "Facebook DM": subscribed if they opted in to email in ManyChat,
-// otherwise Mailchimp sends them a confirmation email first. MAILCHIMP_AUDIENCE_ID picks the audience if the
-// account has several.
+// audience as subscribed, with the tag "Instagram DM" or "Facebook DM": the fan typed their email into the DM to
+// join the list (Raphael's call on 26 Oct 2026; before that, Mailchimp asked them to confirm by email first).
+// MAILCHIMP_AUDIENCE_ID picks the audience if the account has several.
+// POST {"action": "subscribe-pending"} moves every fan in the fans table who is still waiting to confirm in
+// Mailchimp to subscribed ({"action": "subscribe-pending", "check": true} only counts them). It never returns
+// an address and is capped at 5 runs an hour.
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { createHash } from "node:crypto";
@@ -89,49 +92,105 @@ function emailOf(c: Contact): string {
   return EMAIL_RE.test(cleaned) ? cleaned.slice(0, 254) : "";
 }
 
-// Adds or updates the fan in Mailchimp. Returns Mailchimp's status, or null when Mailchimp isn't connected.
-async function toMailchimp(fan: { email: string; first_name: string; last_name: string; optin_email: boolean; source: string }) {
+// Mailchimp's address, auth header and audience, or null when Mailchimp isn't connected. The audience is looked
+// up once per instance.
+let audienceCache = "";
+async function mailchimp() {
   const key = Deno.env.get("MAILCHIMP_API_KEY");
   if (!key) return null;
   const dc = key.split("-").pop();
   if (!dc || !/^[a-z]+\d+$/.test(dc)) throw new Error("MAILCHIMP_API_KEY doesn't end in its data centre, e.g. -us21.");
   const base = `https://${dc}.api.mailchimp.com/3.0`;
   const headers = { Authorization: `Basic ${btoa(`nlt:${key}`)}`, "Content-Type": "application/json" };
-  let list = Deno.env.get("MAILCHIMP_AUDIENCE_ID") ?? "";
+  let list = Deno.env.get("MAILCHIMP_AUDIENCE_ID") || audienceCache;
   if (!list) {
     const r = await fetch(`${base}/lists?count=10&fields=lists.id,lists.name`, { headers });
     const b = await r.json().catch(() => ({})) as { lists?: { id: string }[] };
     if (!r.ok) throw new Error(`Mailchimp lists: HTTP ${r.status}`);
     if (b.lists?.length !== 1) throw new Error(`Mailchimp has ${b.lists?.length ?? 0} audiences; set MAILCHIMP_AUDIENCE_ID.`);
-    list = b.lists[0].id;
+    list = audienceCache = b.lists[0].id;
   }
+  return { base, headers, list };
+}
+
+// Adds or updates the fan in Mailchimp as subscribed. A fan still waiting to confirm is switched to subscribed;
+// someone who unsubscribed or bounced is left as they are. Returns Mailchimp's status, or null when Mailchimp
+// isn't connected.
+async function toMailchimp(fan: { email: string; first_name: string; last_name: string; source: string }) {
+  const mc = await mailchimp();
+  if (!mc) return null;
   // Mailchimp addresses a member by the MD5 of the lowercased email.
-  const hash = createHash("md5").update(fan.email).digest("hex");
-  const put = await fetch(`${base}/lists/${list}/members/${hash}`, {
+  const member = `${mc.base}/lists/${mc.list}/members/${createHash("md5").update(fan.email).digest("hex")}`;
+  const put = await fetch(member, {
     method: "PUT",
-    headers,
+    headers: mc.headers,
     body: JSON.stringify({
       email_address: fan.email,
-      // Only people who opted in to email in ManyChat are subscribed straight away; the rest confirm by email.
-      status_if_new: fan.optin_email ? "subscribed" : "pending",
+      status_if_new: "subscribed",
       merge_fields: { FNAME: fan.first_name, LNAME: fan.last_name },
     }),
   });
   const pb = await put.json().catch(() => ({})) as { status?: string; title?: string; detail?: string };
   if (!put.ok) throw new Error(`Mailchimp ${put.status}: ${pb.title ?? ""} ${pb.detail ?? ""}`.trim());
-  const tag = await fetch(`${base}/lists/${list}/members/${hash}/tags`, {
+  let status = String(pb.status ?? "");
+  if (status === "pending") {
+    const patch = await fetch(member, { method: "PATCH", headers: mc.headers, body: JSON.stringify({ status: "subscribed" }) });
+    const ab = await patch.json().catch(() => ({})) as { status?: string; title?: string; detail?: string };
+    if (!patch.ok) throw new Error(`Mailchimp ${patch.status}: ${ab.title ?? ""} ${ab.detail ?? ""}`.trim());
+    status = String(ab.status ?? status);
+  }
+  const tag = await fetch(`${member}/tags`, {
     method: "POST",
-    headers,
+    headers: mc.headers,
     body: JSON.stringify({ tags: [{ name: fan.source === "manychat-facebook" ? "Facebook DM" : "Instagram DM", status: "active" }] }),
   });
   if (!tag.ok) console.error("mailchimp tag", tag.status, (await tag.text()).slice(0, 200));
-  return String(pb.status ?? "");
+  return status;
+}
+
+async function saveStatus(email: string, run: () => Promise<string | null>) {
+  try {
+    const status = await run();
+    if (status !== null) await db.from("fans").update({ mailchimp_status: status, mailchimp_synced_at: new Date().toISOString(), mailchimp_error: null }).eq("email", email);
+    return status;
+  } catch (e) {
+    console.error("mailchimp", e);
+    await db.from("fans").update({ mailchimp_error: String(e).slice(0, 300) }).eq("email", email);
+    return "failed";
+  }
+}
+
+// Every fan still waiting to confirm, switched to subscribed, five at a time. Counts only in the answer.
+async function subscribePending(check: boolean) {
+  if (!await allow("manychat:subscribe-pending", "1 hour", 5)) throw new HttpError(429, "Ran a few times already. Try again in an hour.");
+  const mc = await mailchimp();
+  if (!mc) throw new HttpError(503, "Mailchimp isn't connected yet.");
+  const { data, error } = await db.from("fans").select("email, first_name, last_name, source").eq("mailchimp_status", "pending").limit(5000);
+  if (error) { console.error("fans read", error); throw new HttpError(500, "Couldn't read the fans."); }
+  const rows = (data ?? []) as { email: string; first_name: string | null; last_name: string | null; source: string | null }[];
+  if (check) {
+    // Classic automations that could email people as they become subscribed (journeys aren't listed by the API).
+    const r = await fetch(`${mc.base}/automations?count=100&fields=automations.status,automations.trigger_settings.workflow_type`, { headers: mc.headers });
+    const b = await r.json().catch(() => ({})) as { automations?: { status?: string; trigger_settings?: { workflow_type?: string } }[] };
+    return {
+      pending: rows.length,
+      automations: r.ok ? (b.automations ?? []).map((a) => ({ status: a.status ?? "", type: a.trigger_settings?.workflow_type ?? "" })) : `HTTP ${r.status}`,
+    };
+  }
+  const tally: Record<string, number> = {};
+  for (let i = 0; i < rows.length; i += 5) {
+    const results = await Promise.all(rows.slice(i, i + 5).map((f) => saveStatus(f.email, () =>
+      toMailchimp({ email: f.email, first_name: f.first_name ?? "", last_name: f.last_name ?? "", source: f.source ?? "" }))));
+    for (const s of results) tally[s ?? "none"] = (tally[s ?? "none"] ?? 0) + 1;
+  }
+  return { ok: true, total: rows.length, ...tally };
 }
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Use POST." }, 405);
   try {
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    if (body.action === "subscribe-pending") return json(await subscribePending(body.check === true));
     const id = clip(body.subscriber_id ?? body.contact_id ?? body.id, 30);
     if (!/^\d{3,25}$/.test(id)) return json({ error: "Send the ManyChat contact ID as subscriber_id." }, 400);
     if (!await allow(`manychat:${id}`, "1 hour", 10)) return json({ error: "Too many requests for this contact." }, 429);
@@ -156,15 +215,7 @@ Deno.serve(async (req) => {
     if (error) { console.error("fans upsert", error); return json({ error: "Couldn't save the contact." }, 500); }
 
     // Mailchimp after answering, so ManyChat's flow never waits on it.
-    const sync = (async () => {
-      try {
-        const status = await toMailchimp(fan);
-        if (status !== null) await db.from("fans").update({ mailchimp_status: status, mailchimp_synced_at: new Date().toISOString(), mailchimp_error: null }).eq("email", email);
-      } catch (e) {
-        console.error("mailchimp", e);
-        await db.from("fans").update({ mailchimp_error: String(e).slice(0, 300) }).eq("email", email);
-      }
-    })();
+    const sync = saveStatus(email, () => toMailchimp(fan));
     (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(sync);
     return json({ ok: true, saved: true });
   } catch (e) {
