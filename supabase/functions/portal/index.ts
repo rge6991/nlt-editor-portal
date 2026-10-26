@@ -1238,6 +1238,49 @@ async function publerSetup() {
   return value;
 }
 
+// Publer's chart data: { current: { followers: { data: [{ date, value }] } } }. Read tolerantly.
+function chartPoints(d: unknown, id: string): { date: string; value: number }[] {
+  const o = (d ?? {}) as Record<string, unknown>;
+  const cur = (o.current as Record<string, unknown> | undefined)?.[id] ?? o[id]
+    ?? (Array.isArray(o.charts) ? (o.charts as Record<string, unknown>[]).find((c) => c.id === id) : undefined);
+  const c = (cur ?? {}) as Record<string, unknown>;
+  const arr = (Array.isArray(cur) ? cur : c.data ?? c.series ?? c.points ?? []) as Record<string, unknown>[];
+  return arr.map((x) => {
+    const v = x.value ?? x.last_value ?? x.count;
+    const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+    return { date: String(x.date ?? x.day ?? "").slice(0, 10), value: Number.isFinite(n) ? Math.round(n) : 0 };
+  }).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.date) && x.value > 0);
+}
+
+// Publer gives daily follower counts only for ranges of up to 7 days, so ask a week at a time.
+// The first time an account is seen, go back about two months; after that, the last week is enough.
+async function refreshFollowers(workspace: string, accounts: { id: string; network: string }[]) {
+  const today = viennaParts(Date.now()).date;
+  let sampled = false;
+  for (const acc of accounts) {
+    try {
+      const { count } = await db.from("follower_counts").select("day", { count: "exact", head: true }).eq("account_id", acc.id);
+      const weeks = count ? 1 : 9;
+      const rows: Record<string, unknown>[] = [];
+      for (let w = 0; w < weeks; w++) {
+        const to = isoOfDay(dayNum(today) - 7 * w), from = isoOfDay(dayNum(to) - 6);
+        const d = await publer(`/analytics/${encodeURIComponent(acc.id)}/chart_data?chart_ids[]=followers&from=${from}&to=${to}`, workspace);
+        const pts = chartPoints(d, "followers");
+        if (!pts.length && !sampled) { sampled = true; console.error("publer followers empty", acc.network, from, JSON.stringify(d).slice(0, 800)); }
+        if (!pts.length && w > 0) break;
+        for (const x of pts) rows.push({ account_id: acc.id, network: acc.network, day: x.date, followers: x.value, fetched_at: new Date().toISOString() });
+      }
+      const unique = [...new Map(rows.map((r) => [String(r.day), r])).values()];
+      if (unique.length) {
+        const { error } = await db.from("follower_counts").upsert(unique);
+        if (error) console.error("follower_counts upsert", error);
+      }
+    } catch (e) {
+      console.error("publer followers", acc.network, e);
+    }
+  }
+}
+
 let refreshing: Promise<void> | null = null;
 async function refreshPubler(force = false) {
   if (!Deno.env.get("PUBLER_API_KEY")) return;
@@ -1307,6 +1350,8 @@ async function refreshPubler(force = false) {
     } catch (e) {
       console.error("publer links", e);
     }
+    // Followers per account and day (non-fatal: the post numbers are saved either way).
+    await refreshFollowers(workspace, accounts).catch((e) => console.error("publer followers", e));
     for (const r of rows) r.link = links.get(String(r.id)) ?? null;
     // One row per post, even if Publer lists a post twice across pages.
     const unique = [...new Map(rows.map((r) => [String(r.id), r])).values()];
@@ -1319,13 +1364,14 @@ async function refreshPubler(force = false) {
   return refreshing;
 }
 
-type PostRow = { id: string; network: string; published_at: string; text: string; link: string | null; views: number | null; reach: number | null; likes: number | null; comments: number | null; shares: number | null; saves: number | null };
+type PostRow = { id: string; account_id: string; network: string; published_at: string; text: string; link: string | null; views: number | null; reach: number | null; likes: number | null; comments: number | null; shares: number | null; saves: number | null };
 
 async function loadPosts(network: string, days: number): Promise<PostRow[]> {
-  const { data, error } = await db.from("publer_posts")
-    .select("id, network, published_at, text, link, views, reach, likes, comments, shares, saves")
-    .eq("network", network).gte("published_at", new Date(Date.now() - days * 86400_000).toISOString())
-    .order("published_at", { ascending: false }).limit(2000);
+  let q = db.from("publer_posts")
+    .select("id, account_id, network, published_at, text, link, views, reach, likes, comments, shares, saves")
+    .gte("published_at", new Date(Date.now() - days * 86400_000).toISOString());
+  if (network !== "all") q = q.eq("network", network);
+  const { data, error } = await q.order("published_at", { ascending: false }).limit(4000);
   if (error) { console.error("publer_posts read", error); throw new HttpError(500, "Couldn't read the numbers. Try again."); }
   return (data ?? []) as PostRow[];
 }
@@ -1354,13 +1400,100 @@ async function postIndex() {
       template: t ? { id: t.id, name: t.name, pay: t.pay, level: t.level } : null,
       athletes: ((r.fields[PB.athletes] as string[] | undefined) ?? []).map((id) => ath.get(id)?.name ?? "").filter(Boolean),
     };
+    // Lines are "Channel | post ID | account ID | time". Some rows store a different post ID than Publer's
+    // numbers use, so the account and the minute it went out (give or take two) find it too.
     for (const line of String(r.fields[PB.posts] ?? "").split("\n")) {
-      const pid = (line.split("|")[1] ?? "").trim();
+      const [, pid, acc, when] = line.split("|").map((x) => (x ?? "").trim());
       if (pid) map.set(pid, info);
+      const t = Date.parse(when ?? "");
+      if (acc && Number.isFinite(t)) {
+        const m = Math.round(t / 60_000);
+        for (let k = m - 2; k <= m + 2; k++) map.set(`${acc}@${k}`, info);
+      }
     }
   }
   postIndexCache = { at: Date.now(), map };
   return map;
+}
+
+type VideoInfo = { title: string; videoUrl: string; editor: string; template: { id: string; name: string; pay: number | null; level: string } | null; athletes: string[] };
+type Cluster = PostRow & { members: PostRow[]; networks: string[] };
+function videoOf(index: Map<string, VideoInfo>, p: PostRow | Cluster): VideoInfo | null {
+  const list = "members" in p ? p.members : [p];
+  for (const m of list) {
+    const v = index.get(m.id) ?? (m.account_id ? index.get(`${m.account_id}@${Math.round(Date.parse(m.published_at) / 60_000)}`) : undefined);
+    if (v) return v;
+  }
+  return null;
+}
+
+// All channels: the same video on several channels counts once. Posts within 15 minutes of each other on
+// different channels are one video; its number is views on Instagram, Facebook and YouTube plus TikTok reach.
+function clusterPosts(posts: PostRow[]): Cluster[] {
+  const out: Cluster[] = [];
+  for (const p of posts.slice().sort((a, b) => a.published_at.localeCompare(b.published_at))) {
+    const t = Date.parse(p.published_at);
+    const c = out.find((x) => !x.networks.includes(p.network) && Math.abs(Date.parse(x.members[0].published_at) - t) <= 15 * 60_000);
+    if (c) { c.members.push(p); c.networks.push(p.network); } else out.push({ ...p, members: [p], networks: [p.network] });
+  }
+  const add = (list: PostRow[], k: keyof PostRow) => { const v = list.map((m) => m[k]).filter((x) => x !== null && x !== undefined) as number[]; return v.length ? v.reduce((a, b) => a + b, 0) : null; };
+  for (const c of out) {
+    const ig = c.members.find((m) => m.network === "instagram");
+    const lead = ig ?? c.members[0];
+    const views = c.members.map((m) => m.views ?? (m.network === "tiktok" ? m.reach : null)).filter((x) => x !== null) as number[];
+    Object.assign(c, {
+      id: lead.id, account_id: "", network: "all", text: lead.text, link: lead.link ?? c.members.find((m) => m.link)?.link ?? null,
+      views: views.length ? views.reduce((a, b) => a + b, 0) : null,
+      reach: add(c.members, "reach"), likes: add(c.members, "likes"), comments: add(c.members, "comments"),
+      shares: add(c.members, "shares"), saves: add(c.members, "saves"),
+    });
+  }
+  return out;
+}
+
+// Followers per day from follower_counts. A day's change is the count that day minus the day before, per account,
+// added up over the accounts that have both days.
+async function followerStats(network: string) {
+  const today = viennaParts(Date.now()).date;
+  let q = db.from("follower_counts").select("account_id, network, day, followers").gte("day", isoOfDay(dayNum(today) - 120));
+  if (network !== "all") q = q.eq("network", network);
+  const { data, error } = await q.limit(5000);
+  if (error) { console.error("follower_counts read", error); return null; }
+  const rows = (data ?? []) as { account_id: string; network: string; day: string; followers: number }[];
+  if (!rows.length) return null;
+  const byAcc = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    if (!byAcc.has(r.account_id)) byAcc.set(r.account_id, new Map());
+    byAcc.get(r.account_id)!.set(String(r.day).slice(0, 10), r.followers);
+  }
+  const changeOn = (day: string, accs: string[] = [...byAcc.keys()]) => {
+    const prev = isoOfDay(dayNum(day) - 1);
+    let sum = 0, any = false;
+    for (const a of accs) {
+      const m = byAcc.get(a); const x = m?.get(day), y = m?.get(prev);
+      if (x !== undefined && y !== undefined) { sum += x - y; any = true; }
+    }
+    return any ? sum : null;
+  };
+  const sumOver = (from: number, to: number, accs?: string[]) => {
+    let t = 0, any = false;
+    for (let d = from; d <= to; d++) { const c = changeOn(isoOfDay(d), accs); if (c !== null) { t += c; any = true; } }
+    return any ? t : null;
+  };
+  const now = [...byAcc.values()].reduce((t, m) => { const days = [...m.keys()].sort(); return t + (m.get(days[days.length - 1]) ?? 0); }, 0);
+  const t0 = dayNum(today);
+  const days = [];
+  for (let i = 27; i >= 0; i--) { const d = isoOfDay(t0 - i); days.push({ date: d, change: changeOn(d), current: i === 0 }); }
+  const thisMonday = mondayOf(today);
+  const weeks = [];
+  for (let i = 11; i >= 0; i--) { const s = dayNum(thisMonday) - 7 * i; weeks.push({ start: isoOfDay(s), change: sumOver(s, Math.min(s + 6, t0)), current: i === 0 }); }
+  return {
+    now, change7: sumOver(t0 - 6, t0), change28: sumOver(t0 - 27, t0),
+    firstDay: rows.map((r) => String(r.day).slice(0, 10)).sort()[0],
+    days, weeks,
+    // New followers on the day a post went out and the day after, on that post's accounts.
+    gain: (accs: string[], day: string) => sumOver(dayNum(day), dayNum(day) + 1, accs.filter((a) => byAcc.has(a))),
+  };
 }
 
 const firstLineOf = (s: string) => (String(s || "").split("\n").map((x) => x.trim()).find(Boolean) ?? "").slice(0, 140);
@@ -1369,19 +1502,23 @@ async function insights(req: Request, body: Record<string, unknown>) {
   const s = await sessionFrom(req);
   await requireReviewer(s);
   if (!Deno.env.get("PUBLER_API_KEY")) return { connected: false };
-  const network = NETWORKS.includes(String(body.channel)) ? String(body.channel) : "instagram";
+  const network = NETWORKS.includes(String(body.channel)) ? String(body.channel) : "all";
   if (body.refresh === true) {
     if (!await allow("publer-refresh", "10 minutes", 4)) throw new HttpError(429, "Just refreshed. Try again in a few minutes.");
     await refreshPubler(true);
   } else {
     await refreshPubler(false).catch((e) => console.error("publer refresh", e));
   }
-  const [posts, index, last] = await Promise.all([loadPosts(network, LOOKBACK_DAYS), postIndex().catch(() => new Map()), getState("publer_refreshed")]);
+  const [raw, index, last, fol] = await Promise.all([
+    loadPosts(network, LOOKBACK_DAYS), postIndex().catch(() => new Map()), getState("publer_refreshed"),
+    followerStats(network).catch((e) => { console.error("follower stats", e); return null; }),
+  ]);
+  const posts: (PostRow | Cluster)[] = network === "all" ? clusterPosts(raw) : raw;
   // TikTok: Publer gives reach, not views.
   const useReach = network === "tiktok" && !posts.some((p) => p.views !== null && p.views > 0);
-  const val = (p: PostRow) => (useReach ? p.reach : p.views) ?? null;
+  const val = (p: PostRow | Cluster) => (useReach ? p.reach : p.views) ?? null;
   const counted = posts.filter((p) => val(p) !== null);
-  const dayOf = (p: PostRow) => viennaParts(Date.parse(p.published_at)).date;
+  const dayOf = (p: PostRow | Cluster) => viennaParts(Date.parse(p.published_at)).date;
   const today = viennaParts(Date.now()).date;
 
   // Typical (median) video per week and per day.
@@ -1402,10 +1539,10 @@ async function insights(req: Request, body: Record<string, unknown>) {
   const last28 = counted.filter((p) => dayOf(p) > since(28));
   const last30 = counted.filter((p) => dayOf(p) > since(30));
   const typical30 = median(last30.map((p) => val(p)!));
-  const sum = (list: PostRow[], k: keyof PostRow) => list.reduce((t, p) => t + (Number(p[k]) || 0), 0);
-  const viewsIn = (list: PostRow[]) => list.reduce((t, p) => t + (val(p) ?? 0), 0);
-  const describe = (p: PostRow) => {
-    const info = index.get(p.id);
+  const sum = (list: (PostRow | Cluster)[], k: keyof PostRow) => list.reduce((t, p) => t + (Number(p[k]) || 0), 0);
+  const viewsIn = (list: (PostRow | Cluster)[]) => list.reduce((t, p) => t + (val(p) ?? 0), 0);
+  const describe = (p: PostRow | Cluster) => {
+    const info = videoOf(index, p);
     const v = val(p) ?? 0;
     return {
       id: p.id,
@@ -1416,7 +1553,8 @@ async function insights(req: Request, body: Record<string, unknown>) {
       x: typical30 ? Math.round((v / typical30) * 10) / 10 : null,
       shares1k: per1k(Number(p.shares) || 0, v),
       likes1k: per1k(Number(p.likes) || 0, v),
-      video: info ?? null,
+      video: info,
+      networks: "networks" in p ? p.networks : [p.network],
     };
   };
   const top = last30.slice().sort((a, b) => (val(b) ?? 0) - (val(a) ?? 0)).slice(0, 8).map(describe);
@@ -1424,7 +1562,7 @@ async function insights(req: Request, body: Record<string, unknown>) {
   // By template, last 90 days (our videos only).
   const groups = new Map<string, { name: string; pay: number | null; level: string; values: number[]; shares: number; views: number }>();
   for (const p of counted.filter((x) => dayOf(x) > since(90))) {
-    const info = index.get(p.id);
+    const info = videoOf(index, p);
     if (!info) continue;
     const key = info.template?.id ?? "own";
     const g = groups.get(key) ?? { name: info.template?.name ?? "Own idea", pay: info.template?.pay ?? null, level: info.template?.level ?? "", values: [] as number[], shares: 0, views: 0 };
@@ -1435,6 +1573,21 @@ async function insights(req: Request, body: Record<string, unknown>) {
     const typical = median(g.values);
     return { id, name: g.name, level: g.level, pay: g.pay, posts: g.values.length, typical, shares1k: per1k(g.shares, g.views), costPer1k: g.pay != null && typical ? Math.round((g.pay / typical) * 100000) / 100 : null };
   }).sort((a, b) => (b.typical ?? 0) - (a.typical ?? 0));
+
+  // Posts after which the most people followed (posting day and the day after).
+  let followers = null;
+  if (fol) {
+    const accsOf = (p: PostRow | Cluster) => ("members" in p ? p.members : [p]).map((m) => m.account_id).filter(Boolean);
+    const windowOf = (p: PostRow | Cluster) => dayNum(dayOf(p));
+    const recent = counted.filter((p) => dayOf(p) > since(60));
+    const withGain = recent.map((p) => ({ p, gain: fol.gain(accsOf(p), dayOf(p)) })).filter((x) => x.gain !== null) as { p: PostRow | Cluster; gain: number }[];
+    const top = withGain.sort((a, b) => b.gain - a.gain).slice(0, 8).map(({ p, gain }) => ({
+      ...describe(p), followers: gain,
+      // Other posts on the same accounts in the same two days share these followers.
+      shared: recent.filter((o) => o !== p && Math.abs(windowOf(o) - windowOf(p)) <= 1 && accsOf(o).some((a) => accsOf(p).includes(a))).length,
+    }));
+    followers = { now: fol.now, change7: fol.change7, change28: fol.change28, firstDay: fol.firstDay, days: fol.days, weeks: fol.weeks, top };
+  }
 
   const thisWeek = weeks[11], lastWeek = weeks[10];
   return {
@@ -1449,7 +1602,7 @@ async function insights(req: Request, body: Record<string, unknown>) {
       shares1k: per1k(sum(last28, "shares"), viewsIn(last28)),
       likes1k: per1k(sum(last28, "likes"), viewsIn(last28)),
     },
-    weeks, days, top, byTemplate,
+    weeks, days, top, byTemplate, followers,
   };
 }
 
@@ -1474,7 +1627,7 @@ async function weekSummary() {
     posts: list.length,
     views: list.reduce((t, p) => t + (p.views ?? 0), 0),
     typical: median(list.map((p) => p.views!)),
-    best: best ? { caption: firstLineOf(best.text), views: best.views, link: best.link ? webLink(best.link) : "", video: index.get(best.id) ?? null } : null,
+    best: best ? { caption: firstLineOf(best.text), views: best.views, link: best.link ? webLink(best.link) : "", video: videoOf(index, best) } : null,
   };
 }
 
@@ -1523,7 +1676,7 @@ async function teamTemplates(req: Request) {
       const [posts, index] = await Promise.all([loadPosts("instagram", 90), postIndex()]);
       const by = new Map<string, number[]>();
       for (const p of posts) {
-        const id = index.get(p.id)?.template?.id;
+        const id = videoOf(index, p)?.template?.id;
         if (!id || p.views === null) continue;
         by.set(id, [...(by.get(id) ?? []), p.views]);
       }
