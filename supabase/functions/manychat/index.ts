@@ -3,9 +3,11 @@
 // ID (External Request, POST {"subscriber_id": "<Contact Id>"}). Nothing else in the request is trusted: name,
 // email, Instagram handle and email opt-in are read back from ManyChat's API with NLT's own key
 // (MANYCHAT_API_KEY secret), so calling this URL can't add made-up addresses.
+// Works the same for Instagram and Facebook Messenger contacts.
 // Each fan is saved in Postgres (fans). When MAILCHIMP_API_KEY is set, they're also added to the Mailchimp
-// audience with the tag "Instagram DM": subscribed if they opted in to email in ManyChat, otherwise Mailchimp
-// sends them a confirmation email first. MAILCHIMP_AUDIENCE_ID picks the audience if the account has several.
+// audience with the tag "Instagram DM" or "Facebook DM": subscribed if they opted in to email in ManyChat,
+// otherwise Mailchimp sends them a confirmation email first. MAILCHIMP_AUDIENCE_ID picks the audience if the
+// account has several.
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { createHash } from "node:crypto";
@@ -16,7 +18,6 @@ const db = createClient(
   { auth: { persistSession: false } },
 );
 const EMAIL_RE = /^[^\s@<>()",;]+@[^\s@<>()",;]+\.[a-z]{2,}$/i;
-const MAILCHIMP_TAG = "Instagram DM";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -34,8 +35,17 @@ async function allow(key: string, window: string, max: number) {
 
 type Contact = {
   first_name?: string; last_name?: string; email?: string; optin_email?: boolean; ig_username?: string;
+  ig_id?: unknown; last_interaction?: string | null; ig_last_interaction?: string | null;
   custom_fields?: { name?: string; value?: unknown }[]; tags?: { name?: string }[];
 };
+
+// Where the fan wrote to us: the channel of their latest message (Instagram or Facebook Messenger).
+function channelOf(c: Contact): "instagram" | "facebook" {
+  const ig = Date.parse(c.ig_last_interaction ?? "") || 0;
+  const fb = Date.parse(c.last_interaction ?? "") || 0;
+  if (ig || fb) return ig >= fb ? "instagram" : "facebook";
+  return c.ig_id || c.ig_username ? "instagram" : "facebook";
+}
 
 async function manychatContact(id: string): Promise<Contact> {
   const key = Deno.env.get("MANYCHAT_API_KEY");
@@ -67,7 +77,7 @@ function emailOf(c: Contact): string {
 }
 
 // Adds or updates the fan in Mailchimp. Returns Mailchimp's status, or null when Mailchimp isn't connected.
-async function toMailchimp(fan: { email: string; first_name: string; last_name: string; optin_email: boolean }) {
+async function toMailchimp(fan: { email: string; first_name: string; last_name: string; optin_email: boolean; source: string }) {
   const key = Deno.env.get("MAILCHIMP_API_KEY");
   if (!key) return null;
   const dc = key.split("-").pop();
@@ -99,7 +109,7 @@ async function toMailchimp(fan: { email: string; first_name: string; last_name: 
   const tag = await fetch(`${base}/lists/${list}/members/${hash}/tags`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ tags: [{ name: MAILCHIMP_TAG, status: "active" }] }),
+    body: JSON.stringify({ tags: [{ name: fan.source === "manychat-facebook" ? "Facebook DM" : "Instagram DM", status: "active" }] }),
   });
   if (!tag.ok) console.error("mailchimp tag", tag.status, (await tag.text()).slice(0, 200));
   return String(pb.status ?? "");
@@ -125,7 +135,7 @@ Deno.serve(async (req) => {
       last_name: clip(c.last_name, 80),
       ig_username: clip(c.ig_username, 60).replace(/^@/, ""),
       optin_email: c.optin_email === true,
-      source: "manychat",
+      source: `manychat-${channelOf(c)}`,
       tags: (c.tags ?? []).map((t) => clip(t?.name, 60)).filter(Boolean).slice(0, 30),
       updated_at: now,
     };
