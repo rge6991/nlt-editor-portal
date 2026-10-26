@@ -1740,6 +1740,14 @@ function changeChart(points) {
     <div class="readout small muted" id="readout2" role="status">Green is new followers, red is followers lost. Hover or tap a bar for its number.</div>`;
 }
 
+// "on 20 Oct", "on 20 and 21 Oct", "over 5 days"
+const dayList = (days = []) => {
+  if (!days.length) return "";
+  if (days.length > 2) return ` over ${days.length} days`;
+  const d = days.map(parseDay);
+  return d.length === 2 && d[0].getMonth() === d[1].getMonth() ? ` on ${d[0].getDate()} and ${fmtDay(d[1])}` : ` on ${d.map(fmtDay).join(" and ")}`;
+};
+
 function followersCard(f, ch) {
   if (!f) return `<section class="card" aria-label="Followers"><div class="card-head"><h2>Followers</h2></div><p class="muted" style="margin:0">Follower numbers come with the next refresh from Publer.</p></section>`;
   const startDay = (list) => { const i = list.findIndex((x) => x.change !== null); return list.slice(Math.max(0, Math.min(i < 0 ? 0 : i, list.length - 4))); };
@@ -1753,7 +1761,7 @@ function followersCard(f, ch) {
     return `<div class="vrow">
       ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
       <div class="vinfo"><div class="vt">${esc(p.caption || p.video?.title || "(no caption)")}</div><div class="small muted">${esc(meta)}${p.link ? ` · <a href="${esc(p.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>
-      <div style="text-align:right;min-width:140px"><div class="head ${cls(p.followers)}" style="font-size:22px;line-height:1.1">${esc(signed(p.followers))}</div><div class="small muted">followers in 2 days · ${nf(p.value)} views${p.shared ? ` · shared with ${plural(p.shared, "other post", "other posts")}` : ""}</div></div>
+      <div style="text-align:right;min-width:140px"><div class="head ${cls(p.followers)}" style="font-size:22px;line-height:1.1">${esc(signed(p.followers))}</div><div class="small muted">followers${dayList(p.followerDays)} · ${nf(p.value)} views</div></div>
     </div>`;
   }).join("");
   return `<section class="card" aria-label="Followers">
@@ -1766,7 +1774,7 @@ function followersCard(f, ch) {
     ${changeChart(points)}
     <h3 style="margin:26px 0 4px;font-size:15px">Posts with the most new followers</h3>
     ${rows || `<div class="empty">No posts with follower numbers yet.</div>`}
-    <p class="small muted" style="margin:14px 0 0">The platforms don't say which post brought a follower. This counts new followers on the day a post went out and the day after; posts in the same two days share them. Daily follower numbers from ${esc(dayLabel(f.firstDay))} on.</p>
+    <p class="small muted" style="margin:14px 0 0">The platforms don't say which post brought a follower. On a day an account gains followers, they go to the posts that got views that day and the day before, in proportion to those views, however old the post is. Views per post per day are counted from ${esc(dayLabel(f.perPostFrom || ""))} on; before that, only the Facebook jump on 20 Oct is assigned (to the 11 Oct reel that Facebook pushed on 19 Oct). Daily follower numbers from ${esc(dayLabel(f.firstDay))} on.</p>
   </section>`;
 }
 
@@ -2402,7 +2410,7 @@ function mockTeam(action, payload) {
     const fdays = Array.from({ length: 28 }, (_, i) => { const d = iso(addDays(today, -(27 - i))); const base = i < 16 ? null : [12, 6, 20, 14, -4, 9, 1047, 24, 8, 11, -2, 30][i - 16]; return { date: d, change: base == null || i === 27 ? null : Math.round(base * fscale), current: i === 27 }; });
     const fweeks = Array.from({ length: 12 }, (_, i) => { const st = addDays(mon, -7 * (11 - i)); return { start: iso(st), change: i < 9 ? null : Math.round([68, 1120, 41][i - 9] * fscale), current: i === 11 }; });
     const followers = { now: Math.round(16804 * fscale), change7: Math.round(1070 * fscale), change28: Math.round(1229 * fscale), firstDay: iso(addDays(today, -11)), days: fdays, weeks: fweeks,
-      top: top.slice(0, 4).map((t, i) => ({ ...t, followers: Math.round([1071, 34, 22, -3][i] * fscale), shared: i === 0 ? 1 : 0 })) };
+      top: top.slice(0, 4).map((t, i) => ({ ...t, followers: Math.round([1047, 34, 22, 9][i] * fscale), followerDays: i === 0 ? [iso(addDays(today, -6))] : [iso(addDays(today, -2)), iso(addDays(today, -1))] })), perPostFrom: iso(today) };
     return copy({ connected: true, network: ch, metric: ch === "tiktok" ? "reach" : "views", refreshedAt: new Date(Date.now() - 40 * 60000).toISOString(), followers,
       kpis: { typicalThisWeek: weeks[11].typical, typicalLastWeek: weeks[10].typical, typical4w: typ30, posts4w: 38, views4w: Math.round(152000 * scale), shares1k: 1.4, likes1k: 41 }, weeks, days, top, byTemplate });
   }
