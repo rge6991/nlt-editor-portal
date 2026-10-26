@@ -40,6 +40,8 @@ const TP = {
   music: "fldduTsffgEdHDsSk",
   active: "fldzWMkpVMi2E94hD",
   live: "fldX9foaMixWqRG83",
+  sound: "fldRWRjmfDBVrZhJF",
+  made: "fldCQhsg6K5Ml80l4",
 };
 // Paydays are every second Friday from this date. Keep in step with PAY_ANCHOR in the Airtable "Pay run" script.
 const PAY_ANCHOR = "2026-10-23";
@@ -412,6 +414,8 @@ function shapeTemplate(rec: { id: string; fields: Record<string, unknown> }) {
     music: String(f[TP.music] ?? ""),
     active: f[TP.active] === true,
     live: f[TP.live] === true,
+    sound: String(f[TP.sound] ?? ""),
+    made: num(f[TP.made]) ?? 0,
   };
 }
 type Template = ReturnType<typeof shapeTemplate>;
@@ -429,8 +433,8 @@ async function getTemplates(): Promise<Template[]> {
     for (const r of data.records ?? []) out.push(shapeTemplate(r));
     offset = data.offset ?? "";
   } while (offset);
-  // Simple before Advanced, open before full.
-  const rank = (t: Template) => (t.full ? 2 : 0) + (t.level === "Advanced" ? 1 : 0);
+  // Simple before Medium before Advanced, open before full.
+  const rank = (t: Template) => (t.full ? 3 : 0) + (t.level === "Advanced" ? 2 : t.level === "Medium" ? 1 : 0);
   return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 
@@ -740,7 +744,8 @@ async function resubmit(req: Request, body: Record<string, unknown>) {
 
 // ---------- review ----------
 
-const QUEUE_FORMULA = `OR({Status}="Submitted",{Status}="In Review",{Status}="Needs Resubmission",AND({Status}="Approved",IS_AFTER({Review Date},DATEADD(TODAY(),-15,'days'))))`;
+// Submitted or In Review rows that are already paid are old hourly work, not waiting for a review.
+const QUEUE_FORMULA = `OR(AND(OR({Status}="Submitted",{Status}="In Review"),NOT({Paid})),{Status}="Needs Resubmission",AND({Status}="Approved",IS_AFTER({Review Date},DATEADD(TODAY(),-15,'days'))))`;
 
 async function reviewQueue(req: Request) {
   const s = await sessionFrom(req);
@@ -920,6 +925,670 @@ async function logout(req: Request) {
   return { ok: true };
 }
 
+// ---------- team area (reviewers only) ----------
+// Today, Publish, Templates and Insights. Every action here starts with requireReviewer, so editors never reach it.
+// Publishing reuses the Airtable automations: the portal fills the Publishing row and ticks Send to Publer,
+// the "Send to Publer" automation uploads it to Publer, "Check posted status" records it once it's live.
+// Insights read Publer's post numbers (PUBLER_API_KEY secret) into Postgres, refreshed every few hours.
+
+const T_PUBLISHING = "tblmZSmjJ9Bo4S0Ng";
+const PB = {
+  title: "fldCuGRpDfRSpQ8qz",
+  submission: "flduiMNUakCOc03LK",
+  video: "fldQttgeYZ6FdcAaS",
+  caption: "fldD8MlVYROIQvH0K",
+  channels: "fld2rZEUJub5OmUWO",
+  publishAt: "fldSBE1UhGp8OEdi1",
+  extra: "fld3zYRBAml6UYLPV",
+  trial: "fldhTgo96eGhHtaB0",
+  send: "fldEozK409cgYLUsq",
+  status: "fldKalnALzBJi1IOM",
+  log: "fldoVvKctzsacdmbo",
+  athletes: "fldeLUZswDWC4usyw",
+  postedAt: "fldHLCImT2xYeelJe",
+  ig: "fldseunhkPjMDR81N",
+  fb: "fldeLV1dVdj5DHjna",
+  tt: "fldukHgOJWL9q1RUs",
+  yt: "fld3pz8A9qinjHaWx",
+  posts: "fldXtVZaIBQ6lWryV",
+};
+const T_ATHLETES = "tblBNdi20fT7jJ7ah";
+const AT = { name: "fldvUmmLbdyC8oAWV", ig: "fld9DzX09xkEBBxDP" };
+const V_IN_PAYOUT = "fldpeAOfsTBXFuMvV";
+const CHANNELS = ["Instagram", "Facebook", "TikTok", "YouTube"];
+const TRIAL_MODES = ["Auto-share if it performs", "Manual (share in Instagram)"];
+const LEVELS = ["Simple", "Medium", "Advanced"];
+const NETWORKS = ["instagram", "facebook", "youtube", "tiktok"];
+const VIENNA = "Europe/Vienna";
+const REC_ID = /^rec[A-Za-z0-9]{14}$/;
+
+async function listAll(table: string, fields: string[], formula = "", max = 2000) {
+  const out: { id: string; fields: Record<string, unknown> }[] = [];
+  const f = fields.map((x) => `fields[]=${x}`).join("&");
+  let offset = "";
+  do {
+    const data = await airtable(`${table}?${f}&returnFieldsByFieldId=true&pageSize=100${formula ? `&filterByFormula=${encodeURIComponent(formula)}` : ""}${offset ? `&offset=${offset}` : ""}`);
+    out.push(...(data.records ?? []));
+    offset = data.offset ?? "";
+  } while (offset && out.length < max);
+  return out;
+}
+
+// Vienna wall time for a moment, and the moment for a Vienna wall time (summer time included).
+function viennaParts(ms: number) {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: VIENNA, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date(ms));
+  const g = (t: string) => p.find((x) => x.type === t)?.value ?? "00";
+  return { date: `${g("year")}-${g("month")}-${g("day")}`, time: `${g("hour")}:${g("minute")}` };
+}
+function viennaToUtc(date: string, time: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  const [hh, mm] = time.split(":").map(Number);
+  const wall = Date.UTC(y, m - 1, d, hh, mm);
+  let guess = wall;
+  for (let i = 0; i < 3; i++) {
+    const p = viennaParts(guess);
+    const [py, pm, pd] = p.date.split("-").map(Number);
+    const [ph, pmin] = p.time.split(":").map(Number);
+    guess += wall - Date.UTC(py, pm - 1, pd, ph, pmin);
+  }
+  return guess;
+}
+const dayNum = (isoDay: string) => Date.parse(`${isoDay}T00:00:00Z`) / 86400000;
+const isoOfDay = (n: number) => new Date(n * 86400000).toISOString().slice(0, 10);
+// Monday of the week a Vienna date is in.
+const mondayOf = (isoDay: string) => { const n = dayNum(isoDay); return isoOfDay(n - ((new Date(n * 86400000).getUTCDay() + 6) % 7)); };
+
+function median(list: number[]): number | null {
+  const v = list.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? v[mid] : Math.round((v[mid - 1] + v[mid]) / 2);
+}
+const per1k = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 10000) / 10 : null);
+
+// Athletes with their Instagram handle, cached for ten minutes.
+let athleteCache: { at: number; map: Map<string, { id: string; name: string; handle: string }> } | null = null;
+async function athleteMap() {
+  if (athleteCache && Date.now() - athleteCache.at < 10 * 60_000) return athleteCache.map;
+  const map = new Map<string, { id: string; name: string; handle: string }>();
+  for (const r of await listAll(T_ATHLETES, [AT.name, AT.ig])) {
+    map.set(r.id, { id: r.id, name: String(r.fields[AT.name] ?? "").trim(), handle: String(r.fields[AT.ig] ?? "").trim().replace(/^@/, "") });
+  }
+  athleteCache = { at: Date.now(), map };
+  return map;
+}
+
+// ---- publishing ----
+
+const lastLogEntry = (log: string) => {
+  const parts = String(log || "").trim().split(/\n\s*\n/).filter(Boolean);
+  return (parts[parts.length - 1] ?? "").slice(0, 700);
+};
+
+async function publishData() {
+  const formula = `OR(AND({Publer Status}!='Already posted',{Publer Status}!='Posted'),IS_AFTER({Posted At},DATEADD(NOW(),-21,'days')))`;
+  const [rows, ath, tlist, names] = await Promise.all([
+    listAll(T_PUBLISHING, Object.values(PB).filter((x) => x !== PB.posts), formula),
+    athleteMap(),
+    getTemplates().catch(() => [] as Template[]),
+    editorNames(),
+  ]);
+  const subIds = [...new Set(rows.flatMap((r) => (r.fields[PB.submission] as string[] | undefined) ?? []))];
+  const subs = new Map((await getVideos(subIds) as { id: string; fields: Record<string, unknown> }[]).map((s) => [s.id, s]));
+  const tmap = new Map(tlist.map((t) => [t.id, t]));
+  const items = rows.map((r) => {
+    const f = r.fields;
+    const raw = selectName(f[PB.status]);
+    const posted = raw === "Already posted" || raw === "Posted";
+    const sub = subs.get(((f[PB.submission] as string[] | undefined) ?? [])[0] ?? "");
+    const t = sub ? templateOf(sub.fields, tmap) : null;
+    const pa = f[PB.publishAt] ? Date.parse(String(f[PB.publishAt])) : NaN;
+    const po = f[PB.postedAt] ? Date.parse(String(f[PB.postedAt])) : NaN;
+    const editorId = ((sub?.fields[V.editor] as string[] | undefined) ?? [])[0] ?? "";
+    return {
+      id: r.id,
+      title: String(f[PB.title] ?? ""),
+      caption: String(f[PB.caption] ?? ""),
+      videoUrl: webLink(f[PB.video]),
+      channels: ((f[PB.channels] as unknown[] | undefined) ?? []).map(selectName).filter((c) => CHANNELS.includes(c)),
+      publishAt: Number.isFinite(pa) ? { iso: new Date(pa).toISOString(), ...viennaParts(pa) } : null,
+      status: posted ? "Posted" : raw,
+      sending: f[PB.send] === true,
+      log: lastLogEntry(String(f[PB.log] ?? "")),
+      athletes: ((f[PB.athletes] as string[] | undefined) ?? []).map((id) => ath.get(id)).filter(Boolean),
+      extra: String(f[PB.extra] ?? ""),
+      trial: selectName(f[PB.trial]),
+      template: t ? { id: t.id, name: t.name, level: t.level, pay: t.pay } : null,
+      editor: names.get(editorId) ?? "",
+      submitted: sub ? String(sub.fields[V.submitted] ?? "") : "",
+      postedAt: Number.isFinite(po) ? { iso: new Date(po).toISOString(), ...viennaParts(po) } : null,
+      links: { instagram: webLink(f[PB.ig]), facebook: webLink(f[PB.fb]), tiktok: webLink(f[PB.tt]), youtube: webLink(f[PB.yt]) },
+    };
+  });
+  const now = Date.now();
+  const ready = items.filter((x) => x.status !== "Posted" && x.status !== "Scheduled" && x.status !== "Sending")
+    .sort((a, b) => (a.submitted || "9").localeCompare(b.submitted || "9"));
+  const scheduled = items.filter((x) => x.status === "Scheduled" && x.publishAt && Date.parse(x.publishAt.iso) > now - 3 * 3600_000)
+    .sort((a, b) => a.publishAt!.iso.localeCompare(b.publishAt!.iso));
+  const recent = items.filter((x) => x.status === "Posted" && x.postedAt && Date.parse(x.postedAt.iso) > now - 8 * 86400_000)
+    .sort((a, b) => b.postedAt!.iso.localeCompare(a.postedAt!.iso));
+  return { ready, scheduled, recent };
+}
+
+async function publishQueue(req: Request) {
+  const s = await sessionFrom(req);
+  await requireReviewer(s);
+  const [data, ath] = await Promise.all([publishData(), athleteMap()]);
+  return {
+    ...data,
+    athletes: [...ath.values()].filter((a) => a.name).sort((a, b) => a.name.localeCompare(b.name)),
+    slots: ["07:00", "18:00"],
+    today: viennaParts(Date.now()).date,
+  };
+}
+
+const HANDLE = /^[A-Za-z0-9._]{1,30}$/;
+
+async function publishSchedule(req: Request, body: Record<string, unknown>) {
+  const s = await sessionFrom(req);
+  await requireReviewer(s);
+  const id = clip(body.id, 20);
+  if (!REC_ID.test(id)) throw new HttpError(400, "Unknown video.");
+  const [rec] = await listAll(T_PUBLISHING, [PB.status, PB.send, PB.video], `RECORD_ID()="${id}"`);
+  if (!rec) throw new HttpError(404, "That video isn't in the Publishing table any more.");
+  const status = selectName(rec.fields[PB.status]);
+  if (status === "Scheduled" || status === "Already posted" || status === "Posted") {
+    throw new HttpError(409, status === "Scheduled" ? "This video is already scheduled. Change or cancel it in Publer." : "This video is already live.");
+  }
+  if (rec.fields[PB.send] === true) throw new HttpError(409, "This video is being sent to Publer right now. Wait a minute.");
+
+  const caption = clip(body.caption, 2200);
+  if (!caption) throw new HttpError(400, "Add the caption.");
+  const channels = Array.isArray(body.channels) ? CHANNELS.filter((c) => (body.channels as unknown[]).includes(c)) : [];
+  if (!channels.length) throw new HttpError(400, "Pick at least one channel.");
+  const trial = clip(body.trial, 60);
+  if (trial && !TRIAL_MODES.includes(trial)) throw new HttpError(400, "Pick normal reel or trial reel.");
+  const extras = clip(body.extra, 200).split(/[,\s]+/).map((h) => h.replace(/^@/, "")).filter(Boolean);
+  if (extras.some((h) => !HANDLE.test(h))) throw new HttpError(400, "Extra collaborators: Instagram handles only, separated by commas.");
+  const ath = await athleteMap();
+  const athleteIds = Array.isArray(body.athleteIds) ? (body.athleteIds as unknown[]).map(String).filter((a) => ath.has(a)).slice(0, 10) : null;
+
+  let publishAt: string | null = null;
+  if (body.draft !== true) {
+    const date = clip(body.date, 10), time = clip(body.time, 5);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) throw new HttpError(400, "Pick a day and a time.");
+    const ms = viennaToUtc(date, time);
+    if (!Number.isFinite(ms) || ms < Date.now() + 5 * 60_000) throw new HttpError(400, "Pick a time at least 5 minutes from now.");
+    if (ms > Date.now() + 120 * 86400_000) throw new HttpError(400, "Pick a time within the next four months.");
+    publishAt = new Date(ms).toISOString();
+  }
+  const fields: Record<string, unknown> = {
+    [PB.caption]: caption,
+    [PB.channels]: channels,
+    [PB.publishAt]: publishAt,
+    [PB.extra]: extras.slice(0, 3).join(", "),
+    [PB.trial]: trial || null,
+    [PB.send]: true,
+  };
+  if (athleteIds) fields[PB.athletes] = athleteIds;
+  await airtable(T_PUBLISHING, { method: "PATCH", body: JSON.stringify({ records: [{ id, fields }] }) });
+  return { ok: true, draft: !publishAt };
+}
+
+// ---- open work and money ----
+
+async function openWork() {
+  const formula = `OR(AND(OR({Status}="Submitted",{Status}="In Review"),NOT({Paid})),AND({Status}="Approved",NOT({Paid})))`;
+  const [rows, names] = await Promise.all([
+    listAll(T_VIDEOS, [V.title, V.editor, V.status, V.submitted, V.paid, V.payout, V_IN_PAYOUT], formula),
+    editorNames(),
+  ]);
+  const review = rows.filter((r) => ["Submitted", "In Review"].includes(selectName(r.fields[V.status])))
+    .map((r) => ({
+      id: r.id,
+      title: String(r.fields[V.title] ?? ""),
+      editor: names.get(((r.fields[V.editor] as string[] | undefined) ?? [])[0] ?? "") ?? "",
+      status: selectName(r.fields[V.status]),
+      submitted: String(r.fields[V.submitted] ?? ""),
+    }))
+    .sort((a, b) => (a.submitted || "9").localeCompare(b.submitted || "9"));
+  const approved = rows.filter((r) => selectName(r.fields[V.status]) === "Approved");
+  const owed = Math.round(approved.reduce((t, r) => t + payoutNumber(r.fields[V.payout]), 0) * 100) / 100;
+  return { review, owed, owedVideos: approved.length };
+}
+
+// ---- Publer numbers ----
+
+const PUBLER = "https://app.publer.com/api/v1";
+const WORKSPACE_NAME = "Sports Attention Lab";
+const REFRESH_EVERY_MS = 3 * 3600_000;
+const LOOKBACK_DAYS = 120;
+
+async function publer(path: string, workspace = "") {
+  const key = Deno.env.get("PUBLER_API_KEY");
+  if (!key) throw new HttpError(503, "Publer isn't connected yet.");
+  const headers: Record<string, string> = { Authorization: `Bearer-API ${key}`, Accept: "application/json" };
+  if (workspace) headers["Publer-Workspace-Id"] = workspace;
+  const res = await fetch(PUBLER + path, { headers });
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) {
+    console.error("publer refused", path, res.status, text.slice(0, 300));
+    throw new HttpError(502, "Publer refused the request. The API key needs the Analytics permission.");
+  }
+  if (!res.ok) {
+    console.error("publer", path, res.status, text.slice(0, 300));
+    throw new HttpError(502, "Couldn't reach Publer. Try again in a minute.");
+  }
+  try { return JSON.parse(text); } catch { return {}; }
+}
+const asList = (x: unknown, ...keys: string[]): Record<string, unknown>[] => {
+  if (Array.isArray(x)) return x as Record<string, unknown>[];
+  for (const k of keys) {
+    const v = (x as Record<string, unknown> | null)?.[k];
+    if (Array.isArray(v)) return v as Record<string, unknown>[];
+  }
+  return [];
+};
+function networkOf(x: Record<string, unknown>): string {
+  const provider = String(x.provider ?? "").toLowerCase();
+  if (NETWORKS.includes(provider)) return provider;
+  const s = ["provider", "network", "type", "social_network", "name", "post_link", "link", "url"].map((k) => String(x[k] ?? "")).join(" ").toLowerCase();
+  if (s.includes("instagram") || s.includes("ig_")) return "instagram";
+  if (s.includes("tiktok")) return "tiktok";
+  if (s.includes("youtube") || s.includes("youtu.be")) return "youtube";
+  if (s.includes("facebook") || /\bfb\b/.test(s)) return "facebook";
+  return "";
+}
+// A number Publer may send as a number, a string or an object with a value.
+function metricOf(m: Record<string, unknown>, names: string[]): number | null {
+  const keys = Object.keys(m);
+  for (const n of names) {
+    const k = keys.find((x) => x.toLowerCase() === n);
+    if (!k) continue;
+    let v = m[k];
+    if (v && typeof v === "object") v = (v as Record<string, unknown>).value ?? (v as Record<string, unknown>).total ?? (v as Record<string, unknown>).count;
+    const n2 = typeof v === "number" ? v : parseFloat(String(v ?? "").replace(/,/g, ""));
+    if (Number.isFinite(n2)) return Math.round(n2);
+  }
+  return null;
+}
+
+async function getState(key: string) {
+  const { data } = await db.from("app_state").select("value, updated_at").eq("key", key).maybeSingle();
+  return data as { value: Record<string, unknown>; updated_at: string } | null;
+}
+async function setState(key: string, value: Record<string, unknown>) {
+  await db.from("app_state").upsert({ key, value, updated_at: new Date().toISOString() });
+}
+
+async function publerSetup() {
+  const cached = await getState("publer_setup");
+  if (cached && Date.now() - Date.parse(cached.updated_at) < 24 * 3600_000) {
+    return cached.value as { workspace: string; accounts: { id: string; network: string; name: string }[] };
+  }
+  const wsList = asList(await publer("/workspaces"), "workspaces", "data");
+  const ws = wsList.find((w) => String(w.name ?? "").trim().toLowerCase() === WORKSPACE_NAME.toLowerCase()) ?? wsList[0];
+  if (!ws) throw new HttpError(502, "No Publer workspace found for this API key.");
+  const workspace = String(ws.id);
+  const accounts = asList(await publer("/accounts", workspace), "accounts", "data")
+    .map((a) => ({ id: String(a.id ?? ""), network: networkOf(a), name: String(a.name ?? "") }))
+    .filter((a) => a.id && NETWORKS.includes(a.network));
+  const value = { workspace, accounts };
+  await setState("publer_setup", value);
+  return value;
+}
+
+let refreshing: Promise<void> | null = null;
+async function refreshPubler(force = false) {
+  if (!Deno.env.get("PUBLER_API_KEY")) return;
+  if (!force) {
+    const last = await getState("publer_refreshed");
+    if (last && Date.now() - Date.parse(last.updated_at) < REFRESH_EVERY_MS) return;
+  }
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    const { workspace, accounts } = await publerSetup();
+    const now = Date.now();
+    const from = new Date(now - LOOKBACK_DAYS * 86400_000).toISOString().slice(0, 10);
+    const to = new Date(now + 86400_000).toISOString().slice(0, 10);
+    const rows: Record<string, unknown>[] = [];
+    let sample: unknown = null;
+    let failed = 0;
+    for (const acc of accounts) {
+      let got = 0;
+      try {
+        for (let page = 0; page < 15; page++) {
+          const d = await publer(`/analytics/${encodeURIComponent(acc.id)}/post_insights?from=${from}&to=${to}&page=${page}`, workspace);
+          const list = asList(d, "posts", "data");
+          for (const p of list) {
+            const m = ((p.analytics ?? p.metrics ?? p.insights ?? p.statistics ?? p.stats ?? p) as Record<string, unknown>) || {};
+            const when = Date.parse(String(p.scheduled_at ?? p.published_at ?? p.created_at ?? ""));
+            if (!p.id || !Number.isFinite(when)) continue;
+            const row = {
+              id: String(p.id),
+              account_id: acc.id,
+              network: acc.network,
+              published_at: new Date(when).toISOString(),
+              text: String(p.text ?? p.title ?? "").slice(0, 2200),
+              views: metricOf(m, ["video_views", "videoviews", "views", "plays", "video_plays"]),
+              reach: metricOf(m, ["reach", "impressions_unique"]),
+              likes: metricOf(m, ["likes", "reactions", "like_count"]),
+              comments: metricOf(m, ["comments", "comment_count"]),
+              shares: metricOf(m, ["shares", "share_count"]),
+              saves: metricOf(m, ["saves", "saved"]),
+              raw: p,
+              fetched_at: new Date().toISOString(),
+            };
+            if (row.views === null && row.likes === null && !sample) sample = { keys: Object.keys(p), metrics: m };
+            rows.push(row);
+          }
+          got += list.length;
+          const total = typeof (d as Record<string, unknown>)?.total === "number" ? (d as Record<string, number>).total : null;
+          if (list.length < 10 || (total !== null && got >= total)) break;
+        }
+      } catch (e) {
+        // One account failing (e.g. a network Publer has no analytics for) doesn't stop the others.
+        console.error("publer insights", acc.network, acc.id, e);
+        failed++;
+      }
+    }
+    if (accounts.length && failed === accounts.length) throw new HttpError(502, "Couldn't read the numbers from Publer. Try again in a minute.");
+    if (sample) console.error("publer post without numbers", JSON.stringify(sample).slice(0, 1500));
+    // Links to the live posts (nice to have: the numbers are saved without them too).
+    const links = new Map<string, string>();
+    try {
+      for (let page = 0; page < 12; page++) {
+        const d = await publer(`/posts?state=published_posted&from=${from}&to=${to}&page=${page}`, workspace);
+        const list = asList(d, "posts", "data");
+        for (const p of list) if (p.id && webLink(p.post_link)) links.set(String(p.id), webLink(p.post_link));
+        const pages = typeof (d as Record<string, unknown>)?.total_pages === "number" ? (d as Record<string, number>).total_pages : null;
+        if (!list.length || (pages !== null && page + 1 >= pages)) break;
+      }
+    } catch (e) {
+      console.error("publer links", e);
+    }
+    for (const r of rows) r.link = links.get(String(r.id)) ?? null;
+    // One row per post, even if Publer lists a post twice across pages.
+    const unique = [...new Map(rows.map((r) => [String(r.id), r])).values()];
+    for (let i = 0; i < unique.length; i += 200) {
+      const { error } = await db.from("publer_posts").upsert(unique.slice(i, i + 200));
+      if (error) { console.error("publer_posts upsert", error); throw new HttpError(500, "Couldn't save the numbers. Try again."); }
+    }
+    await setState("publer_refreshed", { posts: unique.length, accounts: accounts.length, failed });
+  })().finally(() => { refreshing = null; });
+  return refreshing;
+}
+
+type PostRow = { id: string; network: string; published_at: string; text: string; link: string | null; views: number | null; reach: number | null; likes: number | null; comments: number | null; shares: number | null; saves: number | null };
+
+async function loadPosts(network: string, days: number): Promise<PostRow[]> {
+  const { data, error } = await db.from("publer_posts")
+    .select("id, network, published_at, text, link, views, reach, likes, comments, shares, saves")
+    .eq("network", network).gte("published_at", new Date(Date.now() - days * 86400_000).toISOString())
+    .order("published_at", { ascending: false }).limit(2000);
+  if (error) { console.error("publer_posts read", error); throw new HttpError(500, "Couldn't read the numbers. Try again."); }
+  return (data ?? []) as PostRow[];
+}
+
+// Which of our videos each Publer post is: Publer Posts on the Publishing row (filled by Check posted status).
+let postIndexCache: { at: number; map: Map<string, { title: string; videoUrl: string; editor: string; template: { id: string; name: string; pay: number | null; level: string } | null; athletes: string[] }> } | null = null;
+async function postIndex() {
+  if (postIndexCache && Date.now() - postIndexCache.at < 10 * 60_000) return postIndexCache.map;
+  const [rows, tlist, names, ath] = await Promise.all([
+    listAll(T_PUBLISHING, [PB.title, PB.submission, PB.video, PB.posts, PB.athletes], `{Publer Posts}!=''`),
+    getTemplates().catch(() => [] as Template[]),
+    editorNames(),
+    athleteMap(),
+  ]);
+  const subIds = [...new Set(rows.flatMap((r) => (r.fields[PB.submission] as string[] | undefined) ?? []))];
+  const subs = new Map((await getVideos(subIds) as { id: string; fields: Record<string, unknown> }[]).map((s) => [s.id, s]));
+  const tmap = new Map(tlist.map((t) => [t.id, t]));
+  const map = new Map();
+  for (const r of rows) {
+    const sub = subs.get(((r.fields[PB.submission] as string[] | undefined) ?? [])[0] ?? "");
+    const t = sub ? templateOf(sub.fields, tmap) : null;
+    const info = {
+      title: String(r.fields[PB.title] ?? ""),
+      videoUrl: webLink(r.fields[PB.video]),
+      editor: names.get(((sub?.fields[V.editor] as string[] | undefined) ?? [])[0] ?? "") ?? "",
+      template: t ? { id: t.id, name: t.name, pay: t.pay, level: t.level } : null,
+      athletes: ((r.fields[PB.athletes] as string[] | undefined) ?? []).map((id) => ath.get(id)?.name ?? "").filter(Boolean),
+    };
+    for (const line of String(r.fields[PB.posts] ?? "").split("\n")) {
+      const pid = (line.split("|")[1] ?? "").trim();
+      if (pid) map.set(pid, info);
+    }
+  }
+  postIndexCache = { at: Date.now(), map };
+  return map;
+}
+
+const firstLineOf = (s: string) => (String(s || "").split("\n").map((x) => x.trim()).find(Boolean) ?? "").slice(0, 140);
+
+async function insights(req: Request, body: Record<string, unknown>) {
+  const s = await sessionFrom(req);
+  await requireReviewer(s);
+  if (!Deno.env.get("PUBLER_API_KEY")) return { connected: false };
+  const network = NETWORKS.includes(String(body.channel)) ? String(body.channel) : "instagram";
+  if (body.refresh === true) {
+    if (!await allow("publer-refresh", "10 minutes", 4)) throw new HttpError(429, "Just refreshed. Try again in a few minutes.");
+    await refreshPubler(true);
+  } else {
+    await refreshPubler(false).catch((e) => console.error("publer refresh", e));
+  }
+  const [posts, index, last] = await Promise.all([loadPosts(network, LOOKBACK_DAYS), postIndex().catch(() => new Map()), getState("publer_refreshed")]);
+  // TikTok: Publer gives reach, not views.
+  const useReach = network === "tiktok" && !posts.some((p) => p.views !== null && p.views > 0);
+  const val = (p: PostRow) => (useReach ? p.reach : p.views) ?? null;
+  const counted = posts.filter((p) => val(p) !== null);
+  const dayOf = (p: PostRow) => viennaParts(Date.parse(p.published_at)).date;
+  const today = viennaParts(Date.now()).date;
+
+  // Typical (median) video per week and per day.
+  const thisMonday = mondayOf(today);
+  const weeks = [];
+  for (let i = 11; i >= 0; i--) {
+    const start = isoOfDay(dayNum(thisMonday) - 7 * i), end = isoOfDay(dayNum(start) + 6);
+    const list = counted.filter((p) => { const d = dayOf(p); return d >= start && d <= end; });
+    weeks.push({ start, end, posts: list.length, typical: median(list.map((p) => val(p)!)), total: list.reduce((t, p) => t + val(p)!, 0), current: i === 0 });
+  }
+  const days = [];
+  for (let i = 27; i >= 0; i--) {
+    const d = isoOfDay(dayNum(today) - i);
+    const list = counted.filter((p) => dayOf(p) === d);
+    days.push({ date: d, posts: list.length, typical: median(list.map((p) => val(p)!)), current: i < 2 });
+  }
+  const since = (n: number) => isoOfDay(dayNum(today) - n);
+  const last28 = counted.filter((p) => dayOf(p) > since(28));
+  const last30 = counted.filter((p) => dayOf(p) > since(30));
+  const typical30 = median(last30.map((p) => val(p)!));
+  const sum = (list: PostRow[], k: keyof PostRow) => list.reduce((t, p) => t + (Number(p[k]) || 0), 0);
+  const viewsIn = (list: PostRow[]) => list.reduce((t, p) => t + (val(p) ?? 0), 0);
+  const describe = (p: PostRow) => {
+    const info = index.get(p.id);
+    const v = val(p) ?? 0;
+    return {
+      id: p.id,
+      caption: firstLineOf(p.text),
+      date: dayOf(p),
+      link: p.link ? webLink(p.link) : "",
+      value: v,
+      x: typical30 ? Math.round((v / typical30) * 10) / 10 : null,
+      shares1k: per1k(Number(p.shares) || 0, v),
+      likes1k: per1k(Number(p.likes) || 0, v),
+      video: info ?? null,
+    };
+  };
+  const top = last30.slice().sort((a, b) => (val(b) ?? 0) - (val(a) ?? 0)).slice(0, 8).map(describe);
+
+  // By template, last 90 days (our videos only).
+  const groups = new Map<string, { name: string; pay: number | null; level: string; values: number[]; shares: number; views: number }>();
+  for (const p of counted.filter((x) => dayOf(x) > since(90))) {
+    const info = index.get(p.id);
+    if (!info) continue;
+    const key = info.template?.id ?? "own";
+    const g = groups.get(key) ?? { name: info.template?.name ?? "Own idea", pay: info.template?.pay ?? null, level: info.template?.level ?? "", values: [] as number[], shares: 0, views: 0 };
+    g.values.push(val(p)!); g.shares += Number(p.shares) || 0; g.views += val(p)!;
+    groups.set(key, g);
+  }
+  const byTemplate = [...groups.entries()].map(([id, g]) => {
+    const typical = median(g.values);
+    return { id, name: g.name, level: g.level, pay: g.pay, posts: g.values.length, typical, shares1k: per1k(g.shares, g.views), costPer1k: g.pay != null && typical ? Math.round((g.pay / typical) * 100000) / 100 : null };
+  }).sort((a, b) => (b.typical ?? 0) - (a.typical ?? 0));
+
+  const thisWeek = weeks[11], lastWeek = weeks[10];
+  return {
+    connected: true,
+    network,
+    metric: useReach ? "reach" : "views",
+    refreshedAt: last?.updated_at ?? null,
+    kpis: {
+      typicalThisWeek: thisWeek.typical, typicalLastWeek: lastWeek.typical,
+      typical4w: median(last28.map((p) => val(p)!)), posts4w: last28.length,
+      views4w: viewsIn(last28),
+      shares1k: per1k(sum(last28, "shares"), viewsIn(last28)),
+      likes1k: per1k(sum(last28, "likes"), viewsIn(last28)),
+    },
+    weeks, days, top, byTemplate,
+  };
+}
+
+// Pages other than Insights don't wait for Publer: they show what's saved and refresh behind the scenes.
+function refreshInBackground() {
+  const p = refreshPubler(false).catch((e) => console.error("publer refresh", e));
+  const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  rt?.waitUntil?.(p);
+}
+
+// Last week on Instagram, for the Today page.
+async function weekSummary() {
+  if (!Deno.env.get("PUBLER_API_KEY")) return null;
+  refreshInBackground();
+  const [posts, index] = await Promise.all([loadPosts("instagram", 8), postIndex().catch(() => new Map())]);
+  const today = viennaParts(Date.now()).date;
+  const from = isoOfDay(dayNum(today) - 7);
+  const list = posts.filter((p) => p.views !== null && viennaParts(Date.parse(p.published_at)).date >= from && viennaParts(Date.parse(p.published_at)).date < today);
+  const best = list.slice().sort((a, b) => (b.views ?? 0) - (a.views ?? 0))[0];
+  return {
+    from, to: isoOfDay(dayNum(today) - 1),
+    posts: list.length,
+    views: list.reduce((t, p) => t + (p.views ?? 0), 0),
+    typical: median(list.map((p) => p.views!)),
+    best: best ? { caption: firstLineOf(best.text), views: best.views, link: best.link ? webLink(best.link) : "", video: index.get(best.id) ?? null } : null,
+  };
+}
+
+async function teamOverview(req: Request) {
+  const s = await sessionFrom(req);
+  const reviewer = await requireReviewer(s);
+  const [pub, work, week, tlist] = await Promise.all([
+    publishData(),
+    openWork(),
+    weekSummary().catch((e) => { console.error("week summary", e); return null; }),
+    getTemplates().catch(() => [] as Template[]),
+  ]);
+  const today = viennaParts(Date.now()).date;
+  const lastPlanned = pub.scheduled.length ? pub.scheduled[pub.scheduled.length - 1].publishAt!.date : "";
+  const active = tlist.filter((t) => t.active);
+  return {
+    reviewer: { name: reviewer.name, firstName: reviewer.name.split(" ")[0] || reviewer.name },
+    today,
+    review: { count: work.review.length, oldest: work.review[0]?.submitted ?? "", stuck: work.review.filter((v) => daysBetween(v.submitted, today) >= 3).slice(0, 6) },
+    publish: {
+      ready: pub.ready.length,
+      oldestReady: pub.ready[0]?.submitted ?? "",
+      scheduled: pub.scheduled,
+      plannedUntil: lastPlanned,
+      daysPlanned: lastPlanned ? Math.max(0, daysBetween(today, lastPlanned)) : 0,
+      failed: pub.ready.filter((x) => x.status === "Failed").length,
+    },
+    pay: { nextPayday: nextPayday(), owed: work.owed, owedVideos: work.owedVideos },
+    templates: { active: active.length, live: active.filter((t) => t.live).length, open: active.reduce((t, x) => t + (x.open ?? 0), 0) },
+    week,
+    publerConnected: !!Deno.env.get("PUBLER_API_KEY"),
+  };
+}
+const daysBetween = (a: string, b: string) => (a && b ? Math.round(dayNum(b) - dayNum(a)) : 0);
+
+// ---- templates admin ----
+
+async function teamTemplates(req: Request) {
+  const s = await sessionFrom(req);
+  await requireReviewer(s);
+  const [list, perf] = await Promise.all([
+    getTemplates(),
+    (async () => {
+      if (!Deno.env.get("PUBLER_API_KEY")) return new Map();
+      refreshInBackground();
+      const [posts, index] = await Promise.all([loadPosts("instagram", 90), postIndex()]);
+      const by = new Map<string, number[]>();
+      for (const p of posts) {
+        const id = index.get(p.id)?.template?.id;
+        if (!id || p.views === null) continue;
+        by.set(id, [...(by.get(id) ?? []), p.views]);
+      }
+      return new Map([...by.entries()].map(([id, v]) => [id, { posted: v.length, typical: median(v) }]));
+    })().catch((e) => { console.error("template stats", e); return new Map(); }),
+  ]);
+  return {
+    templates: list.map((t) => {
+      const p = perf.get(t.id) as { posted: number; typical: number | null } | undefined;
+      return { ...t, posted: p?.posted ?? 0, typical: p?.typical ?? null, costPer1k: t.pay != null && p?.typical ? Math.round((t.pay / p.typical) * 100000) / 100 : null };
+    }),
+    levels: LEVELS,
+  };
+}
+
+async function templateSave(req: Request, body: Record<string, unknown>) {
+  const s = await sessionFrom(req);
+  await requireReviewer(s);
+  const id = clip(body.id, 20);
+  if (id && !REC_ID.test(id)) throw new HttpError(400, "Unknown template.");
+  const name = clip(body.name, 80);
+  if (!name) throw new HttpError(400, "Give the template a name.");
+  const level = clip(body.level, 20);
+  if (!LEVELS.includes(level)) throw new HttpError(400, "Pick a level: Simple, Medium or Advanced.");
+  const numOrNull = (v: unknown, max: number, label: string, whole = false) => {
+    if (v === null || v === undefined || String(v).trim() === "") return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > max || (whole && !Number.isInteger(n))) throw new HttpError(400, `${label} must be a number between 0 and ${max}.`);
+    return whole ? n : Math.round(n * 100) / 100;
+  };
+  const pay = numOrNull(body.pay, 100, "Pay");
+  const needed = numOrNull(body.needed, 500, "Needed", true);
+  const example = clip(body.example, 1000);
+  if (example && !/^https:\/\/\S+$/i.test(example)) throw new HttpError(400, "The example must be a link starting with https://.");
+  const live = body.live === true;
+  if (live) {
+    let wasLive = false;
+    if (id) {
+      const [cur] = await listAll(T_TEMPLATES, [TP.live], `RECORD_ID()="${id}"`);
+      if (!cur) throw new HttpError(404, "That template isn't in Airtable any more.");
+      wasLive = cur.fields[TP.live] === true;
+    }
+    if (!wasLive && body.confirmLive !== true) throw new HttpError(400, "Confirm that editors may see this template and its pay.");
+  }
+  const fields: Record<string, unknown> = {
+    [TP.name]: name,
+    [TP.level]: level,
+    [TP.pay]: pay,
+    [TP.needed]: needed,
+    [TP.example]: example || null,
+    [TP.brief]: clip(body.brief, 4000),
+    [TP.text]: clip(body.textOnScreen, 2000),
+    [TP.caption]: clip(body.caption, 2000),
+    [TP.music]: clip(body.music, 300),
+    [TP.sound]: clip(body.sound, 2000),
+    [TP.active]: body.active === true,
+    [TP.live]: live,
+  };
+  const data = id
+    ? await airtable(T_TEMPLATES, { method: "PATCH", body: JSON.stringify({ records: [{ id, fields }], typecast: true }) })
+    : await airtable(T_TEMPLATES, { method: "POST", body: JSON.stringify({ records: [{ fields }], typecast: true }) });
+  postIndexCache = null;
+  return { ok: true, id: data.records?.[0]?.id ?? id };
+}
+
 // ---------- router ----------
 
 Deno.serve(async (req) => {
@@ -938,6 +1607,12 @@ Deno.serve(async (req) => {
       case "review": return json(await review(req, body), 200, origin);
       case "check-caption": return json(await checkCaption(req, body), 200, origin);
       case "upload-signature": return json(await uploadSignature(req), 200, origin);
+      case "team-overview": return json(await teamOverview(req), 200, origin);
+      case "publish-queue": return json(await publishQueue(req), 200, origin);
+      case "publish-schedule": return json(await publishSchedule(req, body), 200, origin);
+      case "insights": return json(await insights(req, body), 200, origin);
+      case "team-templates": return json(await teamTemplates(req), 200, origin);
+      case "template-save": return json(await templateSave(req, body), 200, origin);
       case "logout": return json(await logout(req), 200, origin);
       case "ping": return json({ ok: true }, 200, origin);
       default: return json({ error: "Unknown action." }, 400, origin);
