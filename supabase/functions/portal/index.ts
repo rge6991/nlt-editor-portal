@@ -1384,7 +1384,7 @@ async function loadPosts(network: string, days: number): Promise<PostRow[]> {
 }
 
 // Which of our videos each Publer post is: Publer Posts on the Publishing row (filled by Check posted status).
-let postIndexCache: { at: number; map: Map<string, { title: string; videoUrl: string; editor: string; template: { id: string; name: string; pay: number | null; level: string } | null; athletes: string[] }> } | null = null;
+let postIndexCache: { at: number; map: Map<string, VideoInfo> } | null = null;
 async function postIndex() {
   if (postIndexCache && Date.now() - postIndexCache.at < 10 * 60_000) return postIndexCache.map;
   const [rows, tlist, names, ath] = await Promise.all([
@@ -1400,7 +1400,10 @@ async function postIndex() {
   for (const r of rows) {
     const sub = subs.get(((r.fields[PB.submission] as string[] | undefined) ?? [])[0] ?? "");
     const t = sub ? templateOf(sub.fields, tmap) : null;
-    const info = {
+    const info: VideoInfo = {
+      id: sub?.id ?? "",
+      // What the editor was paid for this video (Payout in Airtable), for cost per 1,000 views.
+      pay: sub ? payoutNumber(sub.fields[V.payout]) || null : null,
       title: String(r.fields[PB.title] ?? ""),
       videoUrl: webLink(r.fields[PB.video]),
       editor: names.get(((sub?.fields[V.editor] as string[] | undefined) ?? [])[0] ?? "") ?? "",
@@ -1423,7 +1426,34 @@ async function postIndex() {
   return map;
 }
 
-type VideoInfo = { title: string; videoUrl: string; editor: string; template: { id: string; name: string; pay: number | null; level: string } | null; athletes: string[] };
+type VideoInfo = { id: string; pay: number | null; title: string; videoUrl: string; editor: string; template: { id: string; name: string; pay: number | null; level: string } | null; athletes: string[] };
+// What the page gets about a video: no pay per video.
+const shownVideo = (v: VideoInfo | null) => (v ? { title: v.title, videoUrl: v.videoUrl, editor: v.editor, template: v.template, athletes: v.athletes } : null);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// Cost per 1,000 views from what editors were actually paid (each video once, even if it went out twice).
+// perTypical: pay for an average video ÷ views of the typical video, so one viral post doesn't hide the cost.
+// blended: everything paid ÷ all the views those videos got.
+function costOf(posts: { info: VideoInfo | null; value: number }[]) {
+  const paid = new Map<string, number>();
+  const values: number[] = [];
+  let views = 0;
+  for (const { info, value } of posts) {
+    if (!info?.pay || !info.id) continue;
+    paid.set(info.id, info.pay);
+    values.push(value);
+    views += value;
+  }
+  if (!paid.size) return null;
+  const spent = [...paid.values()].reduce((a, b) => a + b, 0);
+  const pay = spent / paid.size;
+  const typical = median(values);
+  return {
+    videos: paid.size, posts: values.length, pay: round2(pay), typical, spent: round2(spent), views,
+    perTypical: typical ? round2((pay / typical) * 1000) : null,
+    blended: views ? round2((spent / views) * 1000) : null,
+  };
+}
 type Cluster = PostRow & { members: PostRow[]; networks: string[] };
 function videoOf(index: Map<string, VideoInfo>, p: PostRow | Cluster): VideoInfo | null {
   const list = "members" in p ? p.members : [p];
@@ -1579,9 +1609,10 @@ async function insights(req: Request, body: Record<string, unknown>) {
   } else {
     await refreshPubler(false).catch((e) => console.error("publer refresh", e));
   }
-  const [raw, index, last, fol] = await Promise.all([
-    loadPosts(network, LOOKBACK_DAYS), postIndex().catch(() => new Map()), getState("publer_refreshed"),
+  const [raw, index, last, fol, email] = await Promise.all([
+    loadPosts(network, LOOKBACK_DAYS), postIndex().catch(() => new Map<string, VideoInfo>()), getState("publer_refreshed"),
     followerStats(network).catch((e) => { console.error("follower stats", e); return null; }),
+    emailStats().catch((e) => { console.error("email stats", e); return null; }),
   ]);
   const posts: (PostRow | Cluster)[] = network === "all" ? clusterPosts(raw) : raw;
   // TikTok: Publer gives reach, not views.
@@ -1623,25 +1654,28 @@ async function insights(req: Request, body: Record<string, unknown>) {
       x: typical30 ? Math.round((v / typical30) * 10) / 10 : null,
       shares1k: per1k(Number(p.shares) || 0, v),
       likes1k: per1k(Number(p.likes) || 0, v),
-      video: info,
+      video: shownVideo(info),
       networks: "networks" in p ? p.networks : [p.network],
     };
   };
   const top = last30.slice().sort((a, b) => (val(b) ?? 0) - (val(a) ?? 0)).slice(0, 8).map(describe);
 
   // By template, last 90 days (our videos only).
-  const groups = new Map<string, { name: string; pay: number | null; level: string; values: number[]; shares: number; views: number }>();
+  // Pay is what the editors were actually paid for those videos; the template's price until any are paid.
+  const groups = new Map<string, { name: string; pay: number | null; level: string; values: number[]; shares: number; views: number; posts: { info: VideoInfo | null; value: number }[] }>();
   for (const p of counted.filter((x) => dayOf(x) > since(90))) {
     const info = videoOf(index, p);
     if (!info) continue;
     const key = info.template?.id ?? "own";
-    const g = groups.get(key) ?? { name: info.template?.name ?? "Own idea", pay: info.template?.pay ?? null, level: info.template?.level ?? "", values: [] as number[], shares: 0, views: 0 };
+    const g = groups.get(key) ?? { name: info.template?.name ?? "Own idea", pay: info.template?.pay ?? null, level: info.template?.level ?? "", values: [] as number[], shares: 0, views: 0, posts: [] };
     g.values.push(val(p)!); g.shares += Number(p.shares) || 0; g.views += val(p)!;
+    g.posts.push({ info, value: val(p)! });
     groups.set(key, g);
   }
   const byTemplate = [...groups.entries()].map(([id, g]) => {
     const typical = median(g.values);
-    return { id, name: g.name, level: g.level, pay: g.pay, posts: g.values.length, typical, shares1k: per1k(g.shares, g.views), costPer1k: g.pay != null && typical ? Math.round((g.pay / typical) * 100000) / 100 : null };
+    const pay = costOf(g.posts)?.pay ?? g.pay;
+    return { id, name: g.name, level: g.level, pay, posts: g.values.length, typical, shares1k: per1k(g.shares, g.views), costPer1k: pay != null && typical ? round2((pay / typical) * 1000) : null };
   }).sort((a, b) => (b.typical ?? 0) - (a.typical ?? 0));
 
   // Posts that brought the most new followers (credited by the views they got on the days followers came in).
@@ -1672,8 +1706,9 @@ async function insights(req: Request, body: Record<string, unknown>) {
       views4w: viewsIn(last28),
       shares1k: per1k(sum(last28, "shares"), viewsIn(last28)),
       likes1k: per1k(sum(last28, "likes"), viewsIn(last28)),
+      cost: costOf(last28.map((p) => ({ info: videoOf(index, p), value: val(p)! }))),
     },
-    weeks, days, top, byTemplate, followers,
+    weeks, days, top, byTemplate, followers, email,
   };
 }
 
@@ -1698,18 +1733,19 @@ async function weekSummary() {
     posts: list.length,
     views: list.reduce((t, p) => t + (p.views ?? 0), 0),
     typical: median(list.map((p) => p.views!)),
-    best: best ? { caption: firstLineOf(best.text), views: best.views, link: best.link ? webLink(best.link) : "", video: videoOf(index, best) } : null,
+    best: best ? { caption: firstLineOf(best.text), views: best.views, link: best.link ? webLink(best.link) : "", video: shownVideo(videoOf(index, best)) } : null,
   };
 }
 
 async function teamOverview(req: Request) {
   const s = await sessionFrom(req);
   const reviewer = await requireReviewer(s);
-  const [pub, work, week, tlist] = await Promise.all([
+  const [pub, work, week, tlist, email] = await Promise.all([
     publishData(),
     openWork(),
     weekSummary().catch((e) => { console.error("week summary", e); return null; }),
     getTemplates().catch(() => [] as Template[]),
+    emailStats().catch((e) => { console.error("email stats", e); return null; }),
   ]);
   const today = viennaParts(Date.now()).date;
   const lastPlanned = pub.scheduled.length ? pub.scheduled[pub.scheduled.length - 1].publishAt!.date : "";
@@ -1729,10 +1765,116 @@ async function teamOverview(req: Request) {
     pay: { nextPayday: nextPayday(), owed: work.owed, owedVideos: work.owedVideos },
     templates: { active: active.length, live: active.filter((t) => t.live).length, open: active.reduce((t, x) => t + (x.open ?? 0), 0) },
     week,
+    email: email ? { total: email.total, confirmed: email.confirmed, new7: email.new7 } : null,
     publerConnected: !!Deno.env.get("PUBLER_API_KEY"),
   };
 }
 const daysBetween = (a: string, b: string) => (a && b ? Math.round(dayNum(b) - dayNum(a)) : 0);
+
+// ---- email list ----
+// Fans who gave their email in an Instagram or Facebook DM (ManyChat function, fans table). Only counts leave
+// the server, never an address. Mailchimp asks everyone who didn't opt in to email in ManyChat to confirm by
+// email; syncMailchimp() copies those statuses back every hour.
+
+async function emailStats() {
+  const { data, error } = await db.from("fans").select("source, mailchimp_status, mailchimp_error, carried_over, created_at").limit(50000);
+  if (error) throw error;
+  const rows = (data ?? []) as { source: string | null; mailchimp_status: string | null; mailchimp_error: string | null; carried_over: boolean; created_at: string }[];
+  const today = viennaParts(Date.now()).date;
+  const t0 = dayNum(today);
+  const dayOf = (r: { created_at: string }) => viennaParts(Date.parse(r.created_at)).date;
+  const fresh = rows.filter((r) => !r.carried_over);
+  const from = rows.map(dayOf).sort()[0] ?? today;
+  const perDay = new Map<string, number>();
+  for (const r of fresh) perDay.set(dayOf(r), (perDay.get(dayOf(r)) ?? 0) + 1);
+  // Days before the list started have no number (not 0), so the chart starts on the first day.
+  const countFrom = (a: number, b: number) => {
+    if (isoOfDay(b) < from) return null;
+    let n = 0;
+    for (let d = Math.max(a, dayNum(from)); d <= b; d++) n += perDay.get(isoOfDay(d)) ?? 0;
+    return n;
+  };
+  const days = [];
+  for (let i = 27; i >= 0; i--) days.push({ date: isoOfDay(t0 - i), change: countFrom(t0 - i, t0 - i), current: i === 0 });
+  const weeks = [];
+  const thisMonday = mondayOf(today);
+  for (let i = 11; i >= 0; i--) { const s = dayNum(thisMonday) - 7 * i; weeks.push({ start: isoOfDay(s), change: countFrom(s, Math.min(s + 6, t0)), current: i === 0 }); }
+  const status = (s: string) => rows.filter((r) => r.mailchimp_status === s).length;
+  const synced = await getState("mailchimp_synced");
+  return {
+    total: rows.length,
+    confirmed: status("subscribed"),
+    pending: status("pending"),
+    left: status("unsubscribed") + status("cleaned"),
+    refused: rows.filter((r) => !r.mailchimp_status && r.mailchimp_error).length,
+    instagram: rows.filter((r) => r.source === "manychat-instagram").length,
+    facebook: rows.filter((r) => r.source === "manychat-facebook").length,
+    new7: countFrom(t0 - 6, t0) ?? 0,
+    new28: countFrom(t0 - 27, t0) ?? 0,
+    carriedOver: rows.length - fresh.length,
+    carriedOn: rows.filter((r) => r.carried_over).map(dayOf).sort()[0] ?? null,
+    from,
+    days, weeks,
+    audience: (synced?.value?.audience as number | undefined) ?? null,
+    syncedAt: synced?.updated_at ?? null,
+  };
+}
+
+async function mailchimpApi() {
+  const key = Deno.env.get("MAILCHIMP_API_KEY");
+  const dc = key?.split("-").pop();
+  if (!key || !dc || !/^[a-z]+\d+$/.test(dc)) return null;
+  const base = `https://${dc}.api.mailchimp.com/3.0`;
+  const headers = { Authorization: `Basic ${btoa(`nlt:${key}`)}`, Accept: "application/json" };
+  let list = Deno.env.get("MAILCHIMP_AUDIENCE_ID") ?? "";
+  if (!list) {
+    const r = await fetch(`${base}/lists?count=10&fields=lists.id`, { headers });
+    const b = await r.json().catch(() => ({})) as { lists?: { id: string }[] };
+    if (!r.ok || b.lists?.length !== 1) throw new Error(`Mailchimp lists: HTTP ${r.status}, ${b.lists?.length ?? 0} audiences`);
+    list = b.lists[0].id;
+  }
+  return { base, headers, list };
+}
+
+// Copies Mailchimp's status (pending, subscribed, unsubscribed, cleaned) onto the fans table: everyone the first
+// time, then whoever changed since the last run. Runs with the hourly refresh.
+async function syncMailchimp() {
+  const mc = await mailchimpApi();
+  if (!mc) return;
+  const last = await getState("mailchimp_synced");
+  // Anyone can call refresh-stats, so Mailchimp is asked at most every half hour.
+  if (last && Date.now() - Date.parse(last.updated_at) < 30 * 60_000) return;
+  const since = String(last?.value?.since ?? "");
+  const startedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  const status = new Map<string, string>();
+  for (let offset = 0; offset < 50000; offset += 1000) {
+    const q = new URLSearchParams({ count: "1000", offset: String(offset), fields: "members.email_address,members.status,total_items" });
+    if (since) q.set("since_last_changed", since);
+    const r = await fetch(`${mc.base}/lists/${mc.list}/members?${q}`, { headers: mc.headers });
+    if (!r.ok) throw new Error(`Mailchimp members: HTTP ${r.status}`);
+    const b = await r.json() as { members?: { email_address?: string; status?: string }[]; total_items?: number };
+    for (const m of b.members ?? []) if (m.email_address && m.status) status.set(m.email_address.toLowerCase(), m.status);
+    if (!b.members?.length || offset + 1000 >= (b.total_items ?? 0)) break;
+  }
+  const lr = await fetch(`${mc.base}/lists/${mc.list}?fields=stats.member_count`, { headers: mc.headers });
+  const audience = lr.ok ? ((await lr.json()) as { stats?: { member_count?: number } }).stats?.member_count ?? null : null;
+  if (status.size) {
+    const { data, error } = await db.from("fans").select("email, mailchimp_status").limit(50000);
+    if (error) throw error;
+    const changes = new Map<string, string[]>();
+    for (const f of (data ?? []) as { email: string; mailchimp_status: string | null }[]) {
+      const s = status.get(f.email);
+      if (s && s !== f.mailchimp_status) changes.set(s, [...(changes.get(s) ?? []), f.email]);
+    }
+    for (const [s, emails] of changes) {
+      for (let i = 0; i < emails.length; i += 100) {
+        const { error: ue } = await db.from("fans").update({ mailchimp_status: s, mailchimp_synced_at: new Date().toISOString(), mailchimp_error: null }).in("email", emails.slice(i, i + 100));
+        if (ue) throw ue;
+      }
+    }
+  }
+  await setState("mailchimp_synced", { since: startedAt, audience });
+}
 
 // ---- templates admin ----
 
@@ -1742,23 +1884,27 @@ async function teamTemplates(req: Request) {
   const [list, perf] = await Promise.all([
     getTemplates(),
     (async () => {
-      if (!Deno.env.get("PUBLER_API_KEY")) return new Map();
+      if (!Deno.env.get("PUBLER_API_KEY")) return { by: new Map(), own: null };
       refreshInBackground();
       const [posts, index] = await Promise.all([loadPosts("instagram", 90), postIndex()]);
       const by = new Map<string, number[]>();
+      const own: { info: VideoInfo | null; value: number }[] = [];
       for (const p of posts) {
-        const id = videoOf(index, p)?.template?.id;
-        if (!id || p.views === null) continue;
-        by.set(id, [...(by.get(id) ?? []), p.views]);
+        const info = videoOf(index, p);
+        if (!info || p.views === null) continue;
+        if (!info.template) { own.push({ info, value: p.views }); continue; }
+        by.set(info.template.id, [...(by.get(info.template.id) ?? []), p.views]);
       }
-      return new Map([...by.entries()].map(([id, v]) => [id, { posted: v.length, typical: median(v) }]));
-    })().catch((e) => { console.error("template stats", e); return new Map(); }),
+      return { by: new Map([...by.entries()].map(([id, v]) => [id, { posted: v.length, typical: median(v) }])), own: costOf(own) };
+    })().catch((e) => { console.error("template stats", e); return { by: new Map(), own: null }; }),
   ]);
   return {
     templates: list.map((t) => {
-      const p = perf.get(t.id) as { posted: number; typical: number | null } | undefined;
-      return { ...t, posted: p?.posted ?? 0, typical: p?.typical ?? null, costPer1k: t.pay != null && p?.typical ? Math.round((t.pay / p.typical) * 100000) / 100 : null };
+      const p = perf.by.get(t.id) as { posted: number; typical: number | null } | undefined;
+      return { ...t, posted: p?.posted ?? 0, typical: p?.typical ?? null, costPer1k: t.pay != null && p?.typical ? round2((t.pay / p.typical) * 1000) : null };
     }),
+    // Videos made without a template, to price templates against: Instagram, last 90 days.
+    own: perf.own ? { posted: perf.own.posts, pay: perf.own.pay, typical: perf.own.typical, costPer1k: perf.own.perTypical } : null,
     levels: LEVELS,
   };
 }
@@ -1837,8 +1983,14 @@ Deno.serve(async (req) => {
       case "insights": return json(await insights(req, body), 200, origin);
       case "team-templates": return json(await teamTemplates(req), 200, origin);
       case "template-save": return json(await templateSave(req, body), 200, origin);
-      // Safe to call from anywhere: refreshes Publer's numbers at most every 3 hours and returns nothing.
-      case "refresh-stats": await refreshPubler(false).catch((e) => console.error("scheduled refresh", e)); return json({ ok: true }, 200, origin);
+      // Safe to call from anywhere: refreshes Publer's numbers at most every 3 hours and Mailchimp's statuses at
+      // most every half hour, and returns nothing.
+      case "refresh-stats":
+        await Promise.all([
+          refreshPubler(false).catch((e) => console.error("scheduled refresh", e)),
+          syncMailchimp().catch((e) => console.error("mailchimp sync", e)),
+        ]);
+        return json({ ok: true }, 200, origin);
       case "logout": return json(await logout(req), 200, origin);
       case "ping": return json({ ok: true }, 200, origin);
       default: return json({ error: "Unknown action." }, 400, origin);

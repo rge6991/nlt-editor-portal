@@ -1439,6 +1439,11 @@ function renderTeam() {
             </div>
           </div>
         </section>` : ""}
+        ${o.email ? `<a class="card" href="#/insights" aria-label="Email list" style="display:block;text-decoration:none;color:inherit">
+          <div class="card-head" style="margin-bottom:8px"><h2>Email list</h2><span class="small">See more</span></div>
+          <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><span class="head" style="font-size:28px;line-height:1.1">${nf(o.email.total)}</span><span class="small ${o.email.new7 > 0 ? "gain" : "muted"}">${esc(signed(o.email.new7))} this week</span></div>
+          <div class="small muted">${nf(o.email.confirmed)} confirmed in Mailchimp · from Instagram and Facebook DMs</div>
+        </a>` : ""}
         <section class="card" aria-label="Templates">
           <div class="card-head" style="margin-bottom:8px"><h2>Templates</h2><a class="small" href="#/team-templates">Plan and price</a></div>
           <div class="small muted">${plural(o.templates.active, "active template", "active templates")} · ${o.templates.live} live for editors · ${plural(o.templates.open, "video", "videos")} still needed</div>
@@ -1720,7 +1725,7 @@ function barChart(points, unit) {
     <div class="readout small muted" id="readout" role="status">${points[lastFull] ? esc(`${points[lastFull].long}: typical video ${nf(points[lastFull].value)} ${unit}. Orange is the best, striped is still collecting views. Hover or tap a bar for its numbers.`) : "No videos with numbers yet."}</div>`;
 }
 
-function changeChart(points) {
+function changeChart(points, { noun = "followers", out = "readout2", note = "Green is new followers, red is followers lost. Hover or tap a bar for its number." } = {}) {
   const vals = points.map((p) => Number(p.value) || 0);
   const maxPos = Math.max(0, ...vals), maxNeg = Math.max(0, ...vals.map((v) => -v));
   const span = Math.max(1, maxPos + maxNeg);
@@ -1729,15 +1734,15 @@ function changeChart(points) {
   points.forEach((p, i) => { if (!p.current && p.value != null && p.value > 0 && (best < 0 || vals[i] > vals[best])) best = i; });
   const bars = points.map((p, i) => {
     const v = vals[i], h = Math.max(v ? 2 : 0, (Math.abs(v) / span) * 100);
-    const tip = p.value == null ? `${p.long}: no follower numbers` : `${p.long}: ${signed(p.value)} followers${p.current ? " so far" : ""}`;
+    const tip = p.value == null ? `${p.long}: no numbers yet` : `${p.long}: ${signed(p.value)} ${noun}${p.current ? " so far" : ""}`;
     const bar = !v ? "" : v > 0 ? `<div class="b" style="bottom:${100 - zero}%;height:${h}%"></div>` : `<div class="b neg" style="top:${zero}%;height:${h}%"></div>`;
-    return `<div class="cbar ${p.current ? "cur" : ""}" tabindex="0" role="img" aria-label="${esc(tip)}" data-tip="${esc(tip)}" data-out="readout2">${bar}${i === best ? `<span class="v" style="bottom:calc(${100 - zero + h}% + 4px)">${esc(signed(v))}</span>` : ""}</div>`;
+    return `<div class="cbar ${p.current ? "cur" : ""}" tabindex="0" role="img" aria-label="${esc(tip)}" data-tip="${esc(tip)}" data-out="${out}">${bar}${i === best ? `<span class="v" style="bottom:calc(${100 - zero + h}% + 4px)">${esc(signed(v))}</span>` : ""}</div>`;
   }).join("");
   const every = points.length > 14 ? 7 : window.innerWidth < 640 ? 3 : 1;
   const labels = points.map((p, i) => `<span>${(points.length - 1 - i) % every === 0 ? esc(p.label) : ""}</span>`).join("");
   return `<div class="cbars">${maxNeg ? `<div class="zero" style="top:${zero}%"></div>` : ""}${bars}</div>
     <div class="xlabels" aria-hidden="true" style="border-top:1px solid rgba(255,255,255,0.2);padding-top:8px">${labels}</div>
-    <div class="readout small muted" id="readout2" role="status">Green is new followers, red is followers lost. Hover or tap a bar for its number.</div>`;
+    <div class="readout small muted" id="${out}" role="status">${esc(note)}</div>`;
 }
 
 // "on 20 Oct", "on 20 and 21 Oct", "over 5 days"
@@ -1778,6 +1783,34 @@ function followersCard(f, ch) {
   </section>`;
 }
 
+// Email list from Instagram and Facebook DMs (ManyChat). Counts only.
+function emailCard(e) {
+  if (!e) return "";
+  const startDay = (list) => { const i = list.findIndex((x) => x.change !== null); return list.slice(Math.max(0, Math.min(i < 0 ? 0 : i, list.length - 4))); };
+  const points = state.range === "days"
+    ? startDay(e.days).map((x) => { const d = parseDay(x.date); return { label: `${d.getDate()} ${MON[d.getMonth()]}`, long: fmtDate(x.date), value: x.change, current: x.current }; })
+    : startDay(e.weeks).map((x) => { const d = parseDay(x.start); return { label: `${d.getDate()} ${MON[d.getMonth()]}`, long: `Week of ${d.getDate()} ${MON[d.getMonth()]}`, value: x.change, current: x.current }; });
+  const share = (n) => (e.total ? `${Math.round((n / e.total) * 100)}%` : "–");
+  const notes = [
+    e.carriedOver ? `${nf(e.carriedOver)} emails from earlier DMs were carried over on ${esc(dayLabel(e.carriedOn))}: they count in the list, not as new.` : "",
+    `Fans who didn't tick email opt-in get a confirmation email from Mailchimp and count as confirmed once they click it.`,
+    e.left ? `${plural(e.left, "fan has", "fans have")} unsubscribed or bounced since.` : "",
+    e.refused ? `Mailchimp refused ${plural(e.refused, "address", "addresses")} (typos).` : "",
+    e.audience != null ? `The whole Mailchimp audience, all sources together: ${nf(e.audience)} subscribed.` : "",
+    e.syncedAt ? `Mailchimp status updated ${esc(viennaStamp(e.syncedAt))} (Vienna), every hour.` : "Mailchimp status comes with the next hourly refresh.",
+  ].filter(Boolean).join(" ");
+  return `<section class="card" aria-label="Email list" id="email">
+    <div class="card-head"><h2>Email list</h2><span class="small muted">From Instagram and Facebook DMs · all channels</span></div>
+    <div class="tiles">
+      <div class="tile" style="background:var(--field)"><span class="lbl">On the list</span><span class="num">${nf(e.total)}</span><span class="sub">Instagram ${nf(e.instagram)} · Facebook ${nf(e.facebook)}</span></div>
+      <div class="tile" style="background:var(--field)"><span class="lbl">Confirmed</span><span class="num">${nf(e.confirmed)}</span><span class="sub">${share(e.confirmed)} · ${nf(e.pending)} waiting to confirm</span></div>
+      <div class="tile" style="background:var(--field)"><span class="lbl">New, last 7 days</span><span class="num ${e.new7 > 0 ? "gain" : ""}">${esc(signed(e.new7))}</span><span class="sub">Last 4 weeks: ${esc(signed(e.new28))}</span></div>
+    </div>
+    ${changeChart(points, { noun: "new emails", out: "readout3", note: "New emails per " + (state.range === "days" ? "day" : "week") + ". Hover or tap a bar for its number." })}
+    <p class="small muted" style="margin:14px 0 0">${notes}</p>
+  </section>`;
+}
+
 function renderInsights() {
   const ch = state.channel;
   const d = teamData("ins:" + ch);
@@ -1795,7 +1828,7 @@ function renderInsights() {
     return;
   }
   const unit = d.metric === "reach" ? "reach" : "views";
-  const k = d.kpis, wk = d.weeks;
+  const k = d.kpis, wk = d.weeks, c = k.cost;
   const lastW = wk[wk.length - 2], prevW = wk[wk.length - 3];
   const change = lastW?.typical && prevW?.typical ? Math.round((lastW.typical / prevW.typical - 1) * 100) : null;
   const first = wk.findIndex((w) => w.posts > 0);
@@ -1821,10 +1854,10 @@ function renderInsights() {
     ${ch === "tiktok" ? `<p class="small muted" style="margin:-8px 0 0">Publer gives TikTok reach, not views, so compare TikTok only with TikTok.</p>` : ""}
     ${ch === "all" ? `<p class="small muted" style="margin:-8px 0 0">All channels: a video posted to several channels counts once, with its views on Instagram, Facebook and YouTube plus its TikTok reach.</p>` : ""}
     <div class="tiles">
-      <div class="tile"><span class="lbl">Typical video last week</span><span class="num">${nf(k.typicalLastWeek)}</span><span class="sub">${change != null ? `${change >= 0 ? "+" : ""}${change}% on the week before` : unit}</span></div>
+      <div class="tile"><span class="lbl">Typical video last week</span><span class="num">${nf(k.typicalLastWeek)}</span><span class="sub">${change != null ? `${change >= 0 ? "+" : ""}${change}% on the week before` : unit} · ${k.typicalThisWeek == null ? "no videos yet this week" : `this week so far ${nf(k.typicalThisWeek)}`}</span></div>
       <div class="tile"><span class="lbl">Typical video, 4 weeks</span><span class="num">${nf(k.typical4w)}</span><span class="sub">${plural(k.posts4w, "video", "videos")} · ${nf(k.views4w)} ${unit} in total</span></div>
       <div class="tile"><span class="lbl">Shares per 1,000 ${unit}</span><span class="num">${k.shares1k ?? "–"}</span><span class="sub">Last 4 weeks · likes per 1,000: ${k.likes1k ?? "–"}</span></div>
-      <div class="tile"><span class="lbl">This week so far</span><span class="num">${nf(k.typicalThisWeek)}</span><span class="sub">${k.typicalThisWeek == null ? "No videos yet this week" : "Typical video, still collecting views"}</span></div>
+      <div class="tile"><span class="lbl">Cost per 1,000 ${unit}</span><span class="num">${c?.perTypical != null ? usd2(c.perTypical) : "–"}</span><span class="sub">${c ? `${money(c.pay)} a video ÷ typical ${nf(c.typical)} · all ${c.videos} paid videos: ${usd2(c.blended)}` : "Shows once paid videos from the portal are posted"}</span></div>
     </div>
     <section class="card" aria-label="Typical video over time">
       <div class="card-head"><h2>Typical video per ${state.range === "days" ? "day" : "week"}</h2>
@@ -1834,6 +1867,7 @@ function renderInsights() {
       ${first > 0 ? `<p class="small muted" style="margin:10px 0 0">Publer has numbers from the week of ${esc(dayLabel(wk[first].start))} on, when posting through Publer started.</p>` : ""}
     </section>
     ${followersCard(d.followers, ch)}
+    ${emailCard(d.email)}
       <section class="card" aria-label="Best videos">
         <div class="card-head" style="margin-bottom:6px"><h2>Best videos, last 30 days</h2></div>
         ${top || `<div class="empty">No videos with numbers yet.</div>`}
@@ -1841,7 +1875,7 @@ function renderInsights() {
         <section class="card" aria-label="By template">
           <div class="card-head" style="margin-bottom:10px"><h2>By template, last 90 days</h2></div>
           <div class="scroll-x"><table class="tt"><thead><tr><th>Template</th><th>Level</th><th class="n">Videos</th><th class="n">Typical</th><th class="n">Shares /1k</th><th class="n">Pay</th><th class="n">Cost /1k ${unit}</th></tr></thead><tbody>${tplRows || `<tr><td colspan="7" class="muted">No matched videos yet.</td></tr>`}</tbody></table></div>
-          ${onlyOwn ? `<p class="small muted" style="margin:12px 0 0">Once videos made with templates go live, this shows which template gets the most ${unit} per dollar.</p>` : ""}
+          <p class="small muted" style="margin:12px 0 0">Pay is what editors were paid for those videos. Cost per 1,000 ${unit} is pay for a video ÷ the typical video's ${unit}.${onlyOwn ? ` Once videos made with templates go live, this shows which template gets the most ${unit} per dollar.` : ""}</p>
         </section>
     <p class="small muted" style="margin:0">Numbers from Publer, updated ${esc(viennaStamp(d.refreshedAt))} (Vienna). They refresh every few hours.</p>`);
 }
@@ -1864,7 +1898,9 @@ function renderTeamTemplates() {
       <td>${levelBadge(t.level)}</td><td>${tplStatus(t)}</td>
       <td class="n">${t.pay != null ? money(t.pay) : `<span class="zero">–</span>`}</td>
       <td class="n">${t.needed ?? "–"}</td><td class="n">${t.made ?? 0}</td><td class="n">${t.open ?? "–"}</td>
-      <td class="n">${nf(t.typical)}</td><td class="n">${t.costPer1k != null ? usd2(t.costPer1k) : "–"}</td></tr>`).join("");
+      <td class="n">${nf(t.typical)}</td><td class="n">${t.costPer1k != null ? usd2(t.costPer1k) : "–"}</td></tr>`).join("")
+    + (d.own ? `<tr class="muted"><td>Own idea<div class="small muted">No template, for comparison · ${plural(d.own.posted, "post", "posts")}</div></td><td></td><td></td>
+      <td class="n">${money(d.own.pay)}</td><td class="n">–</td><td class="n">–</td><td class="n">–</td><td class="n">${nf(d.own.typical)}</td><td class="n">${d.own.costPer1k != null ? usd2(d.own.costPer1k) : "–"}</td></tr>` : "");
   app.innerHTML = shell("ttpl", `
     <div class="hero">
       <div>
@@ -1883,7 +1919,7 @@ function renderTeamTemplates() {
     <section class="card" aria-label="How to price">
       <div class="card-head" style="margin-bottom:12px"><h2>How to price</h2></div>
       <div class="levels3">${LEVEL_INFO.map(([l, txt]) => `<div>${levelBadge(l)}<span>${esc(txt)}</span></div>`).join("")}</div>
-      <p class="small muted" style="margin:14px 0 0">Price by the work: every extra angle means more footage to find and more cuts. Once videos are live, cost per 1,000 views shows which templates earn their price.</p>
+      <p class="small muted" style="margin:14px 0 0">Price by the work: every extra angle means more footage to find and more cuts. Once videos are live, cost per 1,000 views shows which templates earn their price.${d.own?.costPer1k != null ? ` Today a video without a template pays ${money(d.own.pay)} and its typical Instagram post gets ${nf(d.own.typical)} views: ${usd2(d.own.costPer1k)} per 1,000 views. That's the number a template has to beat.` : ""}</p>
     </section>
     <section class="card" aria-label="All templates">
       <div class="card-head" style="margin-bottom:10px"><h2>All templates</h2><span class="small muted">Typical views and cost: Instagram, last 90 days</span></div>
@@ -2318,6 +2354,13 @@ function mockApi(action, payload) {
 }
 
 // Sample team data for ?mock: publishing queue, Today, templates and Insights (nothing is saved).
+function mockEmail(today) {
+  const days = Array.from({ length: 28 }, (_, i) => ({ date: iso(addDays(today, -(27 - i))), change: i < 18 ? null : [3, 0, 2, 5, 1, 0, 4, 2, 1, 3][i - 18], current: i === 27 }));
+  const mon = weekStart(today);
+  const weeks = Array.from({ length: 12 }, (_, i) => ({ start: iso(addDays(mon, -7 * (11 - i))), change: i < 10 ? null : [9, 12][i - 10], current: i === 11 }));
+  return { total: 156, confirmed: 41, pending: 112, left: 2, refused: 1, instagram: 149, facebook: 7, new7: 13, new28: 21, carriedOver: 135, carriedOn: iso(addDays(today, -9)), from: iso(addDays(today, -9)), days, weeks, audience: 2310, syncedAt: new Date(Date.now() - 20 * 60000).toISOString() };
+}
+
 function mockTeam(action, payload) {
   if (!window.__team) {
     const today = viennaNow().date, D = (n) => iso(addDays(parseDay(today), n));
@@ -2375,13 +2418,14 @@ function mockTeam(action, payload) {
       publish: { ready: tm.pub.ready.length, oldestReady: tm.pub.ready[0]?.submitted || "", scheduled: sch, plannedUntil: last, daysPlanned: last ? Math.round((parseDay(last) - parseDay(tm.today)) / 86400000) : 0, failed: tm.pub.ready.filter((x) => x.status === "Failed").length },
       pay: { nextPayday: window.__mock.nextPayday, owed: 48, owedVideos: 6 },
       templates: { active: act.length, live: act.filter((t) => t.live).length, open: act.reduce((s, t) => s + (Number(t.open) || 0), 0) },
+      email: { total: 148, confirmed: 41, new7: 13 },
       week: { from: "", to: "", posts: 9, views: 41200, typical: 3150, best: { caption: "Maybe the perfect shot does exist… 🍿", views: 66625, link: "https://www.instagram.com/", video: { title: "Batch 3 - Reel 1", videoUrl: "", editor: "Ralph Hepollo", template: null, athletes: ["Rainhard Riede"] } } },
       publerConnected: true,
     });
   }
   if (action === "team-templates") {
     const stats = [[6, 4200], [4, 2900]];
-    return copy({ templates: tm.T.map((t, i) => { const [posted, typical] = stats[i] || [0, null]; return { ...t, posted, typical, costPer1k: t.pay != null && typical ? Math.round((t.pay / typical) * 100000) / 100 : null }; }), levels: ["Simple", "Medium", "Advanced"] });
+    return copy({ templates: tm.T.map((t, i) => { const [posted, typical] = stats[i] || [0, null]; return { ...t, posted, typical, costPer1k: t.pay != null && typical ? Math.round((t.pay / typical) * 100000) / 100 : null }; }), own: { posted: 10, pay: 8, typical: 3066, costPer1k: 2.61 }, levels: ["Simple", "Medium", "Advanced"] });
   }
   if (action === "template-save") {
     const fields = { name: payload.name, level: payload.level, pay: payload.pay === "" ? null : Number(payload.pay), needed: payload.needed === "" ? null : Number(payload.needed), example: payload.example, brief: payload.brief, textOnScreen: payload.textOnScreen, caption: payload.caption, music: payload.music, sound: payload.sound, active: payload.active, live: payload.live };
@@ -2402,7 +2446,7 @@ function mockTeam(action, payload) {
     const top = caps.map((c, i) => { const v = Math.round([66625, 21400, 12950, 8800, 6100, 4900][i] * scale); return { id: "p" + i, caption: c, date: iso(addDays(today, -3 - i * 4)), link: "https://www.instagram.com/", value: v, x: Math.round((v / typ30) * 10) / 10, shares1k: [1.8, 2.4, 1.1, 0.9, 1.6, 0.7][i], likes1k: 40 + i, video: i % 2 ? null : { title: "Batch " + (3 + i), videoUrl: "", editor: "Ralph Hepollo", template: i === 2 ? tm.T[0] && { id: tm.T[0].id, name: tm.T[0].name, pay: tm.T[0].pay, level: tm.T[0].level } : null, athletes: [] } }; });
     const byTemplate = [
       { id: tm.T[0]?.id, name: tm.T[0]?.name, level: tm.T[0]?.level, pay: tm.T[0]?.pay, posts: 6, typical: Math.round(4200 * scale), shares1k: 2.1 },
-      { id: "own", name: "Own idea", level: "", pay: null, posts: 21, typical: typ30, shares1k: 1.3 },
+      { id: "own", name: "Own idea", level: "", pay: 8, posts: 21, typical: typ30, shares1k: 1.3 },
       { id: tm.T[1]?.id, name: tm.T[1]?.name, level: tm.T[1]?.level, pay: tm.T[1]?.pay, posts: 4, typical: Math.round(2900 * scale), shares1k: 1.0 },
     ].filter((t) => t.id).map((t) => ({ ...t, costPer1k: t.pay != null && t.typical ? Math.round((t.pay / t.typical) * 100000) / 100 : null }));
     top.forEach((t, i) => { t.networks = ch === "all" ? (i % 2 ? ["instagram", "facebook"] : ["instagram", "facebook", "tiktok", "youtube"]) : [ch]; });
@@ -2412,7 +2456,9 @@ function mockTeam(action, payload) {
     const followers = { now: Math.round(16804 * fscale), change7: Math.round(1070 * fscale), change28: Math.round(1229 * fscale), firstDay: iso(addDays(today, -11)), days: fdays, weeks: fweeks,
       top: top.slice(0, 4).map((t, i) => ({ ...t, followers: Math.round([1047, 34, 22, 9][i] * fscale), followerDays: i === 0 ? [iso(addDays(today, -6))] : [iso(addDays(today, -2)), iso(addDays(today, -1))] })), perPostFrom: iso(today) };
     return copy({ connected: true, network: ch, metric: ch === "tiktok" ? "reach" : "views", refreshedAt: new Date(Date.now() - 40 * 60000).toISOString(), followers,
-      kpis: { typicalThisWeek: weeks[11].typical, typicalLastWeek: weeks[10].typical, typical4w: typ30, posts4w: 38, views4w: Math.round(152000 * scale), shares1k: 1.4, likes1k: 41 }, weeks, days, top, byTemplate });
+      kpis: { typicalThisWeek: weeks[11].typical, typicalLastWeek: weeks[10].typical, typical4w: typ30, posts4w: 38, views4w: Math.round(152000 * scale), shares1k: 1.4, likes1k: 41,
+        cost: { videos: 12, posts: 14, pay: 8, typical: typ30, spent: 96, views: Math.round(98000 * scale), perTypical: Math.round((8 / typ30) * 100000) / 100, blended: Math.round((96 / (98000 * scale)) * 100000) / 100 } },
+      weeks, days, top, byTemplate, email: mockEmail(today) });
   }
   return null;
 }
