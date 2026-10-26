@@ -283,6 +283,63 @@
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #154F46; color: var(--white); padding: 12px 18px; border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.3); font-size: 14px; z-index: 10; }
   .loading { padding: 80px 0; text-align: center; color: var(--muted); }
 
+  /* Team area (reviewers only) */
+  .b-med { background: rgba(255,214,102,0.16); color: #FFD666; }
+  .b-fail { background: rgba(255,159,128,0.18); color: var(--salmon); }
+  .b-live { background: rgba(99,217,154,0.16); color: var(--green); }
+  .b-team { background: rgba(255,255,255,0.12); color: var(--soft); }
+  a.tile { text-decoration: none; color: var(--white); }
+  a.tile:hover { color: var(--white); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.3); }
+  .tile.warn { box-shadow: inset 0 0 0 1px rgba(255,159,128,0.6); }
+  .tile.warn .num { color: var(--salmon); }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .mini { display: inline-flex; align-items: center; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.08); color: #D5DEDB; }
+  .mini.tpl { background: rgba(240,120,29,0.16); color: var(--orange-soft); }
+  .flow-warn { color: var(--salmon); font-size: 13px; margin-top: 4px; }
+  .flabel { font-size: 14px; font-weight: 700; }
+  .days7 { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
+  .day7 { background: rgba(255,255,255,0.04); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .day7 .dh { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .day7.today .dh { color: var(--orange); }
+  .slot { border-radius: 5px; padding: 8px; background: var(--field); font-size: 13px; min-width: 0; }
+  .slot .st { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .slot .sv { overflow-wrap: anywhere; color: #E3EAE8; }
+  .slot.free { background: transparent; border: 1px dashed rgba(255,255,255,0.22); color: var(--muted); }
+  .slot.plan { box-shadow: inset 0 0 0 1px rgba(240,120,29,0.8); background: rgba(240,120,29,0.08); }
+  .slot.clash { box-shadow: inset 0 0 0 1px rgba(255,159,128,0.85); }
+  .bars { display: flex; align-items: flex-end; gap: 6px; height: 210px; padding-top: 24px; border-bottom: 1px solid rgba(255,255,255,0.2); }
+  .bar { position: relative; flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center; cursor: default; border-radius: 4px; }
+  .bar:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+  .bar .b { width: 100%; max-width: 44px; border-radius: 4px 4px 0 0; background: rgba(255,255,255,0.42); }
+  .bar.best .b { background: var(--orange); }
+  .bar.cur .b { background: repeating-linear-gradient(135deg, rgba(240,120,29,0.9) 0 4px, rgba(240,120,29,0.3) 4px 8px); }
+  .bar:hover .b, .bar:focus .b { filter: brightness(1.2); }
+  .bar .v { position: absolute; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .xlabels { display: flex; gap: 6px; margin-top: 8px; }
+  .xlabels span { flex: 1 1 0; min-width: 0; text-align: center; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: visible; }
+  .readout { margin-top: 14px; min-height: 22px; }
+  .tt { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .tt th { text-align: left; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 400; padding: 0 12px 10px 0; white-space: nowrap; }
+  .tt td { padding: 12px 12px 12px 0; border-top: 1px solid rgba(255,255,255,0.1); vertical-align: top; }
+  .tt .n { text-align: right; white-space: nowrap; }
+  .tt a { color: var(--white); font-weight: 700; }
+  .scroll-x { overflow-x: auto; }
+  .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; font-size: 14px; }
+  .check input { width: 20px; height: 20px; accent-color: var(--orange); margin: 1px 0 0; flex: 0 0 auto; }
+  .lvl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+  .lvl label { position: relative; border: 1px solid rgba(255,255,255,0.22); border-radius: 6px; padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; font-weight: 400; }
+  .lvl label b { font-size: 15px; }
+  .lvl input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .lvl label:has(input:checked) { border-color: var(--orange); background: rgba(240,120,29,0.08); }
+  .lvl label:has(input:focus-visible) { outline: 2px solid var(--orange); outline-offset: 2px; }
+  .form2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; }
+  .levels3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .levels3 > div { background: rgba(255,255,255,0.04); border-radius: 6px; padding: 12px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .scroll-x .tt { min-width: 620px; }
+  @media (max-width: 900px) {
+    .days7 { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  }
+
   @media (max-width: 640px) {
     .top-in { padding: 14px 16px; }
     main.page { padding: 24px 16px 72px; }
@@ -307,6 +364,11 @@
     nav.main { gap: 16px; }
     .lg { display: none; }
     .who { font-size: 0; gap: 0; }
+    .bars { gap: 3px; height: 180px; }
+    .seg { flex-wrap: wrap; }
+    .seg button { padding: 8px 12px; }
+    .xlabels { gap: 3px; }
+    .bar .v { font-size: 11px; }
   }
 
 </style>
@@ -350,7 +412,8 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-const state = { data: null, period: "week", filter: "all", shown: PAGE, upload: null, reupload: null, queue: null, rtab: "todo", drafts: {} };
+const state = { data: null, period: "week", filter: "all", shown: PAGE, upload: null, reupload: null, queue: null, rtab: "todo", drafts: {},
+  view: "", team: null, channel: "instagram", range: "weeks", plan: null, planRunning: false, sched: null };
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -393,7 +456,7 @@ const expected = (v) => v.status === "Approved" || v.amount ? v.amount
 const templates = () => state.data?.templates || [];
 const ownRate = () => Number(state.data?.editor?.rate) || 0;
 const payFor = (t) => (t && t.pay != null ? Number(t.pay) : ownRate());
-const levelBadge = (l) => (l ? `<span class="badge ${l === "Advanced" ? "b-adv" : "b-simple"}">${esc(l)}</span>` : "");
+const levelBadge = (l) => (l ? `<span class="badge ${l === "Advanced" ? "b-adv" : l === "Medium" ? "b-med" : "b-simple"}">${esc(l)}</span>` : "");
 const amountCell = (v) => v.status === "Approved" || v.amount ? money(v.amount) : `<span class="pending" title="Paid once approved">${money(expected(v))}</span>`;
 const isReviewer = () => !!state.data?.reviewer;
 
@@ -483,19 +546,32 @@ async function render() {
     return renderLogin();
   }
   if (h === "#/login" || h === "#/code") { go("#/"); return; }
+  // Team pages are only for people on the Reviewers list; the backend checks that on every team action too.
+  if (isTeamRoute(h)) state.view = "team";
+  else if (h !== "#/" && h !== "#") state.view = "editor";
   app.innerHTML = shell("", `<div class="loading">Loading…</div>`);
   try {
     await ensureData();
-    if (h.startsWith("#/review") && isReviewer()) await ensureQueue();
+    if (isReviewer() && isTeamRoute(h)) await loadTeamFor(h);
   } catch (e) {
     if (!store.token && !MOCK) return;
     app.innerHTML = shell("", `<div class="loading">${esc(e.message)} <button class="linkbtn" data-act="retry">Try again</button></div>`);
     return;
   }
-  if (h.startsWith("#/review/") && isReviewer()) return renderReview(h.slice(9));
-  if (h === "#/review" && isReviewer()) return renderQueue();
-  if (!isEditor()) { go("#/review"); return; }
+  if (isReviewer()) {
+    if (h.startsWith("#/review/")) return renderReview(h.slice(9));
+    if (h === "#/review") return renderQueue();
+    if (h === "#/team") return renderTeam();
+    if (h === "#/publish") return renderPublish();
+    if (h.startsWith("#/publish/")) return renderSchedule(h.slice(10));
+    if (h === "#/insights") return renderInsights();
+    if (h === "#/team-templates") return renderTeamTemplates();
+    if (h.startsWith("#/team-templates/")) return renderTemplateEdit(h.slice(17));
+    if ((h === "#/" || h === "#") && state.view !== "editor") { go("#/team"); return; }
+  }
+  if (!isEditor()) { go("#/team"); return; }
   if (h.startsWith("#/video/")) return renderVideo(h.slice(8));
+  if (h === "#/dashboard") return renderDashboard();
   if (h === "#/templates") return renderTemplates();
   if (h === "#/submit" || h.startsWith("#/submit/")) return renderSubmit(h.slice(9));
   if (h === "#/payments") return renderPayments();
@@ -507,17 +583,22 @@ const LOGO_SVG = document.getElementById("logo-tpl").innerHTML;
 const PHOTO = document.getElementById("photo-tpl").getAttribute("data-src");
 const ARROW = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>`;
 
+const TEAM_KEYS = ["team", "review", "publish", "insights", "ttpl"];
 function shell(active, inner) {
-  const ed = state.data?.editor || state.data?.reviewer;
+  // The team (Reviewers list) gets the team menu; editors only ever see the editor menu.
+  const teamNav = isReviewer() && (TEAM_KEYS.includes(active) || !isEditor() || (active === "" && state.view !== "editor"));
+  const ed = teamNav ? state.data?.reviewer || state.data?.editor : state.data?.editor || state.data?.reviewer;
   const initials = ed ? ed.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() : "";
   const link = (key, href, label, extra = "") => `<a href="${href}" class="${active === key ? "on" : ""}" ${active === key ? 'aria-current="page"' : ""}>${label}${extra}</a>`;
-  const waiting = state.queue ? state.queue.filter((v) => v.status === "Submitted" || v.status === "In Review").length : 0;
+  const waiting = state.queue ? state.queue.filter((v) => v.status === "Submitted" || v.status === "In Review").length : teamData("overview")?.review?.count || 0;
+  const nav = teamNav
+    ? link("team", "#/team", "Today") + link("review", "#/review", "Review", waiting ? ` <span class="count">${waiting}</span>` : "") + link("publish", "#/publish", "Publish") + link("insights", "#/insights", "Insights") + link("ttpl", "#/team-templates", "Templates") + (isEditor() ? `<a href="#/dashboard">Editor view</a>` : "")
+    : (isEditor() ? link("dash", isReviewer() ? "#/dashboard" : "#/", "Dashboard") + (templates().length ? link("tpl", "#/templates", "Templates") : "") + link("submit", "#/submit", 'Submit<span class="lg"> a video</span>') + link("pay", "#/payments", "Payments") : "") + (isReviewer() ? link("team", "#/team", "Team") : "");
   return `
   <header class="top"><div class="top-in">
-    <a class="brand" href="#/" aria-label="No Limits Tour editor portal, home">${LOGO_SVG}<span class="sep"></span><span class="tag">Editor portal</span></a>
+    <a class="brand" href="${teamNav ? "#/team" : "#/"}" aria-label="No Limits Tour ${teamNav ? "team area" : "editor portal"}, home">${LOGO_SVG}<span class="sep"></span><span class="tag">${teamNav ? "Team" : "Editor portal"}</span></a>
     <nav class="main" aria-label="Main">
-      ${isEditor() ? link("dash", "#/", "Dashboard") + (templates().length ? link("tpl", "#/templates", "Templates") : "") + link("submit", "#/submit", 'Submit<span class="lg"> a video</span>') + link("pay", "#/payments", "Payments") : ""}
-      ${isReviewer() ? link("review", "#/review", "Review", waiting ? ` <span class="count">${waiting}</span>` : "") : ""}
+      ${nav}
       ${ed ? `<span class="who"><span class="avatar" aria-hidden="true">${esc(initials)}</span>${esc(ed.name)}</span>` : ""}
       <button class="linkbtn" style="color:var(--soft)" data-act="logout">Log out</button>
     </nav>
@@ -1229,9 +1310,591 @@ function addNote() {
   xIn.focus();
 }
 
+/* ---------- team area (Reviewers list only) ---------- */
+// Today, Publish, Insights and Templates. Editors never get these links or pages, and every team action
+// in the backend checks the Reviewers list again.
+const TEAM_ROUTES = ["#/team", "#/publish", "#/insights", "#/team-templates"];
+const isTeamRoute = (h) => h.startsWith("#/review") || TEAM_ROUTES.some((r) => h === r || h.startsWith(r + "/"));
+const ALL_CHANNELS = ["Instagram", "Facebook", "TikTok", "YouTube"];
+const NETS = [["instagram", "Instagram"], ["facebook", "Facebook"], ["tiktok", "TikTok"], ["youtube", "YouTube"]];
+const TRIALS = [["", "Normal reel"], ["Auto-share if it performs", "Trial reel, shared with followers if it does well"], ["Manual (share in Instagram)", "Trial reel, we share it by hand in Instagram"]];
+const LEVEL_INFO = [["Simple", "One shot, one angle."], ["Medium", "Two or three angles."], ["Advanced", "Four or more angles, or a story."]];
+const nf = (n) => (n === null || n === undefined || n === "" || !Number.isFinite(Number(n)) ? "–" : Math.round(Number(n)).toLocaleString("en-US"));
+const kfmt = (n) => { const v = Number(n) || 0; return v >= 10000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(Math.round(v)); };
+const clipText = (s, n) => { const t = String(s || ""); return t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t; };
+const toMin = (t) => { const [h, m] = String(t || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+function viennaNow() {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Vienna", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date());
+  const g = (t) => p.find((x) => x.type === t)?.value ?? "00";
+  return { date: `${g("year")}-${g("month")}-${g("day")}`, time: `${g("hour")}:${g("minute")}` };
+}
+const viennaStamp = (ts) => (ts ? new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Vienna", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(ts)) : "");
+const athleteNames = (x) => (x?.athletes || []).map((a) => (typeof a === "string" ? a : a?.name)).filter(Boolean);
+function miniTags(x) {
+  const a = athleteNames(x).map((n) => `<span class="mini">${esc(n)}</span>`).join("");
+  const t = x?.template ? `<span class="mini tpl">${esc(x.template.name)}</span>` : "";
+  return a || t ? `<div class="tag-row">${a}${t}</div>` : "";
+}
+// The feed should keep changing: the same athlete or the same template twice in a row reads as a repeat.
+function flowIssue(a, b) {
+  if (!a || !b) return "";
+  const shared = athleteNames(a).filter((n) => athleteNames(b).includes(n));
+  if (shared.length) return `${shared[0]} twice in a row`;
+  if (a.template && b.template && a.template.id === b.template.id) return `${a.template.name} twice in a row`;
+  return "";
+}
+
+// Team data, kept for a minute (Insights for ten) so moving between pages stays quick.
+const TEAM_TTL = { overview: 60_000, pub: 60_000, tpl: 60_000, ins: 10 * 60_000 };
+const teamCache = () => (state.team = state.team || {});
+const teamData = (key) => teamCache()[key]?.data;
+const teamDrop = (...keys) => { const c = teamCache(); keys.forEach((k) => delete c[k]); };
+async function teamGet(key, action, payload = {}, force = false) {
+  const c = teamCache();
+  const ttl = TEAM_TTL[key.split(":")[0]] || 60_000;
+  if (!force && c[key] && Date.now() - c[key].at < ttl) return c[key].data;
+  const data = await api(action, payload);
+  c[key] = { at: Date.now(), data };
+  return data;
+}
+function loadTeamFor(h) {
+  if (h.startsWith("#/review")) return ensureQueue();
+  if (h === "#/team") return teamGet("overview", "team-overview");
+  if (h.startsWith("#/publish")) return teamGet("pub", "publish-queue");
+  if (h.startsWith("#/team-templates")) return teamGet("tpl", "team-templates");
+  if (h === "#/insights") return teamGet("ins:" + state.channel, "insights", { channel: state.channel });
+}
+
+/* --- Today --- */
+function renderTeam() {
+  const o = teamData("overview");
+  const r = o.review, p = o.publish, w = o.week, pay = o.pay;
+  const td = parseDay(o.today);
+  const oldest = r.oldest ? daysSince(r.oldest) : 0;
+  const sch = p.scheduled || [];
+  const attention = [
+    ...r.stuck.map((v) => `<a class="attn-item" href="#/review/${esc(v.id)}"><div style="min-width:0"><div class="vt">${esc(v.title || "(untitled)")}</div><div class="small muted">${esc(v.editor)} · <span class="late">waiting ${esc(ageLabel(v.submitted))}</span></div></div></a>`),
+    p.failed ? `<a class="attn-item" href="#/publish"><div><div class="vt">${plural(p.failed, "post", "posts")} failed in Publer</div><div class="small muted">Open Publish to see why and send again.</div></div></a>` : "",
+    p.daysPlanned < 3 ? `<a class="attn-item" href="#/publish"><div><div class="vt">${p.daysPlanned ? `Only ${plural(p.daysPlanned, "day", "days")} planned` : "Nothing planned"}</div><div class="small muted">${p.ready} videos are ready. Fill the next 7 days.</div></div></a>` : "",
+  ].filter(Boolean);
+  const nextRows = sch.map((x, i) => {
+    const issue = flowIssue(sch[i - 1], x);
+    const t = thumbUrl(x.videoUrl);
+    return `<a class="vrow" href="#/publish/${esc(x.id)}">
+      ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
+      <div class="vinfo"><div class="vt">${esc(x.title || "(untitled)")}</div>${miniTags(x)}${issue ? `<div class="flow-warn">${esc(issue)}</div>` : ""}</div>
+      <div class="small" style="min-width:110px;text-align:right"><b>${esc(fmtDate(x.publishAt.date))}</b><br><span class="muted">${esc(x.publishAt.time)}</span></div>
+    </a>`;
+  }).join("");
+  const best = w?.best;
+  const bt = best?.video ? thumbUrl(best.video.videoUrl, 120, 170) : "";
+  app.innerHTML = shell("team", `
+    <div class="hero">
+      <div>
+        <div class="eyebrow">${esc(DAYS[td.getDay()])} ${td.getDate()} ${esc(MONTHS[td.getMonth()])}</div>
+        <h1 class="head">Hi, ${esc(o.reviewer.firstName)}</h1>
+        <p>What needs the team today.</p>
+      </div>
+    </div>
+    <div class="tiles">
+      <a class="tile ${oldest >= 3 ? "warn" : ""}" href="#/review"><span class="lbl">To review</span><span class="num">${r.count}</span><span class="sub">${r.count ? `Oldest waiting ${esc(ageLabel(r.oldest))}` : "Nothing waiting"}</span></a>
+      <a class="tile ${p.daysPlanned < 3 ? "warn" : ""}" href="#/publish"><span class="lbl">Planned ahead</span><span class="num">${plural(p.daysPlanned, "day", "days")}</span><span class="sub">${p.plannedUntil ? `Posts until ${esc(fmtDate(p.plannedUntil))}` : "Nothing scheduled"} · ${p.ready} ready</span></a>
+      <a class="tile" href="#/insights"><span class="lbl">Typical video last week</span><span class="num">${w ? nf(w.typical) : "–"}</span><span class="sub">${w ? `Instagram views · ${plural(w.posts, "post", "posts")}` : "Connect Publer to see views"}</span></a>
+      <div class="tile"><span class="lbl">Next payday</span><span class="num date">${esc(dayLabel(pay.nextPayday))}</span><span class="sub">${pay.owedVideos ? `${money(pay.owed)} for ${plural(pay.owedVideos, "approved video", "approved videos")}` : "Nothing owed right now"}</span></div>
+    </div>
+    <div class="row">
+      <section class="card grow" aria-label="Next posts">
+        <div class="card-head"><h2>Next posts</h2><a class="btn ghost" href="#/publish">Plan posts</a></div>
+        ${nextRows || `<div class="empty">Nothing scheduled. ${p.ready} videos are ready in Publish.</div>`}
+      </section>
+      <div class="side">
+        <section class="card ${attention.length ? "attn" : ""}" aria-label="Needs a decision">
+          <div class="card-head" style="margin-bottom:8px"><h2>Needs a decision</h2></div>
+          ${attention.length ? attention.join("") : `<div class="empty" style="padding-top:4px">Nothing stuck.</div>`}
+        </section>
+        ${best ? `<section class="card" aria-label="Best video last week">
+          <div class="card-head" style="margin-bottom:12px"><h2>Best video last week</h2></div>
+          <div style="display:flex;gap:14px;align-items:flex-start">
+            ${bt ? `<img class="thumb" style="width:60px;height:86px" src="${esc(bt)}" alt="">` : ""}
+            <div style="min-width:0;display:flex;flex-direction:column;gap:4px">
+              <span class="head" style="font-size:28px;line-height:1.1">${nf(best.views)}</span>
+              <span class="small muted">Instagram views${w.typical ? ` · ${Math.round((best.views / w.typical) * 10) / 10}× the typical video` : ""}</span>
+              <span>${esc(best.caption)}</span>
+              ${best.video ? `<span class="small muted">${esc([best.video.editor, best.video.template?.name].filter(Boolean).join(" · "))}</span>` : ""}
+              ${best.link ? `<a class="small" href="${esc(best.link)}" target="_blank" rel="noopener">Open on Instagram</a>` : ""}
+            </div>
+          </div>
+        </section>` : ""}
+        <section class="card" aria-label="Templates">
+          <div class="card-head" style="margin-bottom:8px"><h2>Templates</h2><a class="small" href="#/team-templates">Plan and price</a></div>
+          <div class="small muted">${plural(o.templates.active, "active template", "active templates")} · ${o.templates.live} live for editors · ${plural(o.templates.open, "video", "videos")} still needed</div>
+        </section>
+      </div>
+    </div>`);
+}
+
+/* --- Publish --- */
+const next7 = (today) => Array.from({ length: 7 }, (_, i) => iso(addDays(parseDay(today), i)));
+const slotKey = (e) => `${e.date} ${e.time}`;
+// Free standard slots in the next 7 days, at least half an hour from now.
+function freeSlots(d) {
+  const now = viennaNow();
+  const taken = new Set(d.scheduled.filter((x) => x.publishAt).map((x) => `${x.publishAt.date} ${x.publishAt.time}`));
+  const out = [];
+  for (const day of next7(d.today)) for (const t of d.slots) {
+    if (taken.has(`${day} ${t}`)) continue;
+    if (day < now.date || (day === now.date && toMin(t) < toMin(now.time) + 30)) continue;
+    out.push({ date: day, time: t });
+  }
+  return out;
+}
+const fixedTimeline = (d) => d.scheduled.filter((x) => x.publishAt).map((x) => ({ date: x.publishAt.date, time: x.publishAt.time, item: x, kind: "scheduled" }));
+const timeline = (d) => [...fixedTimeline(d), ...(state.plan || [])].sort((a, b) => slotKey(a).localeCompare(slotKey(b)));
+const plannable = (x) => x.status !== "Failed" && !x.sending && String(x.caption || "").trim() && x.videoUrl;
+
+// Oldest ready videos first, into the free slots, skipping a video that would repeat the post before or after.
+function makePlan(d) {
+  const pool = d.ready.filter(plannable);
+  const fixed = fixedTimeline(d);
+  const plan = [];
+  for (const s of freeSlots(d)) {
+    if (!pool.length) break;
+    const all = [...fixed, ...plan].sort((a, b) => slotKey(a).localeCompare(slotKey(b)));
+    const before = all.filter((e) => slotKey(e) < slotKey(s)).pop()?.item;
+    const after = fixed.find((e) => slotKey(e) > slotKey(s))?.item;
+    let i = pool.findIndex((x) => !flowIssue(before, x) && !flowIssue(x, after));
+    if (i < 0) i = 0;
+    plan.push({ ...s, item: pool.splice(i, 1)[0], kind: "plan" });
+  }
+  return plan;
+}
+
+function renderPublish() {
+  const d = teamData("pub");
+  const now = viennaNow();
+  const tl = timeline(d);
+  const planKeys = new Set((state.plan || []).map(slotKey));
+  const freeLeft = freeSlots(d).filter((s) => !planKeys.has(slotKey(s)));
+  const canPlan = freeLeft.length && d.ready.some(plannable);
+  const slotHtml = (e, prev) => {
+    if (e.kind === "free") return `<div class="slot free"><span class="st">${esc(e.time)}</span> free</div>`;
+    const issue = flowIssue(prev?.item, e.item);
+    const body = `<div class="st">${esc(e.time)}${e.kind === "plan" ? ` <span style="color:var(--orange-soft);font-weight:400">plan</span>` : ""}</div><div class="sv">${esc(clipText(e.item.title, 64))}</div>${miniTags(e.item)}${issue ? `<div class="flow-warn">${esc(issue)}</div>` : ""}`;
+    return `<div class="slot ${e.kind === "plan" ? "plan" : ""} ${issue ? "clash" : ""}">${body}</div>`;
+  };
+  const days = next7(d.today).map((day) => {
+    const all = [...tl.filter((e) => e.date === day), ...freeLeft.filter((s) => s.date === day).map((s) => ({ ...s, kind: "free" }))]
+      .sort((a, b) => a.time.localeCompare(b.time));
+    return `<div class="day7 ${day === now.date ? "today" : ""}"><div class="dh">${day === now.date ? "Today" : esc(fmtDate(day))}</div>
+      ${all.map((e) => slotHtml(e, e.kind === "free" ? null : tl[tl.indexOf(e) - 1])).join("") || `<div class="small muted">–</div>`}</div>`;
+  }).join("");
+  const n = (state.plan || []).length;
+  const planBar = state.planRunning
+    ? `<span class="small" id="planStatus" role="status">Scheduling…</span>`
+    : state.plan
+      ? `<button class="btn ghost" data-act="clearPlan">Clear plan</button><button class="btn" data-act="runPlan">Schedule ${plural(n, "video", "videos")}</button>`
+      : `<button class="btn ghost" data-act="makePlan" ${canPlan ? "" : "disabled"}>Fill free slots</button>`;
+  const statusOf = (x) => x.sending ? `<span class="badge b-sending">Sending to Publer</span>`
+    : x.status === "Failed" ? `<span class="badge b-fail">Failed</span>`
+    : x.status === "Draft in Publer" ? `<span class="badge b-sub">Draft in Publer</span>` : "";
+  const readyRows = d.ready.map((x) => {
+    const t = thumbUrl(x.videoUrl);
+    return `<a class="vrow" href="#/publish/${esc(x.id)}">
+      ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
+      <div class="vinfo"><div class="vt">${esc(x.title || "(untitled)")}</div><div class="small muted">${esc([x.editor, x.submitted ? `submitted ${dayLabel(x.submitted)}` : ""].filter(Boolean).join(" · "))}</div>${miniTags(x)}
+        ${x.status === "Failed" && x.log ? `<div class="small" style="color:var(--salmon);margin-top:4px">${esc(clipText(x.log, 180))}</div>` : ""}
+        ${!String(x.caption || "").trim() ? `<div class="small" style="color:var(--orange-soft);margin-top:4px">No caption yet</div>` : ""}
+        <div class="badges m">${statusOf(x)}</div></div>
+      <div class="badges d">${statusOf(x)}</div>
+      <span class="btn ghost lg">Schedule</span>
+    </a>`;
+  }).join("");
+  const recentRows = d.recent.map((x) => {
+    const links = Object.entries(x.links || {}).filter(([, u]) => u).map(([k, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(NETS.find((n) => n[0] === k)?.[1] || k)}</a>`).join(" · ");
+    return `<div class="li" style="flex-direction:column;align-items:flex-start;gap:2px"><span>${esc(x.title || "(untitled)")}</span><span class="small muted">${esc(fmtDate(x.postedAt.date))} · ${esc(x.postedAt.time)}${links ? ` · ${links}` : ""}</span></div>`;
+  }).join("");
+  app.innerHTML = shell("publish", `
+    <div class="hero">
+      <div>
+        <div class="eyebrow">Publish · team only</div>
+        <h1 class="head">Publish</h1>
+        <p>Approved videos land here. Pick a slot and Publer posts it; nothing changes in how Airtable sends it.</p>
+      </div>
+      <button class="btn ghost" data-act="reloadPub">Refresh</button>
+    </div>
+    <section class="card" aria-label="Next 7 days">
+      <div class="card-head" style="margin-bottom:8px"><h2>Next 7 days</h2><div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">${planBar}</div></div>
+      <p class="small muted" style="margin:0 0 16px">Slots at 07:00 and 18:00, Vienna time. A red line means the same athlete or template twice in a row.${state.plan ? " Orange slots are the plan: nothing is sent until you press Schedule." : ""}</p>
+      <div class="days7">${days}</div>
+    </section>
+    <div class="row">
+      <section class="card grow" aria-label="Ready to schedule">
+        <div class="card-head" style="margin-bottom:6px"><h2>Ready to schedule</h2><span class="small muted">${plural(d.ready.length, "video", "videos")}, oldest first</span></div>
+        ${readyRows || `<div class="empty">Nothing waiting. Approved videos show up here.</div>`}
+      </section>
+      <div class="side">
+        <section class="card" aria-label="Posted recently">
+          <div class="card-head" style="margin-bottom:6px"><h2>Posted recently</h2></div>
+          <div class="vlist">${recentRows || `<div class="empty">Nothing posted in the last week.</div>`}</div>
+        </section>
+      </div>
+    </div>`);
+}
+
+async function runPlan() {
+  const plan = state.plan || [];
+  if (!plan.length) return;
+  state.planRunning = true;
+  renderPublish();
+  const say = (t) => { const el = document.getElementById("planStatus"); if (el) el.textContent = t; };
+  const failed = [];
+  for (let i = 0; i < plan.length; i++) {
+    const p = plan[i], x = p.item;
+    say(`Scheduling ${i + 1} of ${plan.length}: ${clipText(x.title, 40)}`);
+    try {
+      await api("publish-schedule", { id: x.id, caption: x.caption, channels: x.channels.length ? x.channels : ALL_CHANNELS, date: p.date, time: p.time, extra: x.extra, trial: x.trial });
+    } catch (err) { failed.push(`${clipText(x.title, 40)}: ${err.message}`); }
+    // One at a time, so the Airtable automation and Publer keep up.
+    if (i < plan.length - 1) await new Promise((r) => setTimeout(r, MOCK ? 300 : 15000));
+  }
+  state.plan = null; state.planRunning = false;
+  teamDrop("pub", "overview");
+  toast(failed.length ? `${plan.length - failed.length} scheduled. Not sent: ${failed.join("; ")}` : `${plural(plan.length, "video", "videos")} scheduled. Publer gets them in a minute or two.`);
+  if (location.hash === "#/publish") render();
+}
+
+/* --- Schedule one video --- */
+function renderSchedule(id) {
+  const d = teamData("pub");
+  const x = [...d.ready, ...d.scheduled, ...d.recent].find((v) => v.id === id);
+  const back = `<a class="back" href="#/publish">${ARROW} Publish</a>`;
+  if (!x) { app.innerHTML = shell("publish", `${back}<section class="card"><div class="empty">This video isn't waiting to be scheduled any more.</div></section>`); return; }
+  const now = viennaNow();
+  if (!state.sched || state.sched.id !== id) state.sched = { id, channels: x.channels.length ? [...x.channels] : [...ALL_CHANNELS], athletes: (x.athletes || []).map((a) => a.id) };
+  const s = state.sched;
+  const ath = new Map(d.athletes.map((a) => [a.id, a]));
+  (x.athletes || []).forEach((a) => { if (!ath.has(a.id)) ath.set(a.id, a); });
+  const free = freeSlots(d).filter((f) => !timeline(d).some((e) => slotKey(e) === slotKey(f))).slice(0, 6);
+  const start = x.publishAt && x.publishAt.date >= now.date ? x.publishAt : free[0] || { date: now.date, time: "18:00" };
+  const player = x.videoUrl ? `<video src="${esc(x.videoUrl)}" controls playsinline preload="metadata"></video>` : `<div class="ph">No video file</div>`;
+  const head = `${back}
+    <div class="vhead" style="display:flex;flex-direction:column;gap:8px">
+      <div class="eyebrow">Publish</div>
+      <h1 class="head">${esc(x.title || "(untitled)")}</h1>
+      <div class="small muted">${esc([x.editor, x.submitted ? `submitted ${fmtFull(x.submitted)}` : "", x.template?.name].filter(Boolean).join(" · "))}</div>
+    </div>`;
+  let body;
+  if (x.status === "Scheduled" || x.status === "Posted" || x.sending) {
+    const links = Object.entries(x.links || {}).filter(([, u]) => u).map(([k, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(NETS.find((n) => n[0] === k)?.[1] || k)}</a>`).join(" · ");
+    body = `<div style="display:flex;flex-direction:column;gap:12px">
+      <div class="kv">Status</div>
+      <div>${x.sending ? "Being sent to Publer. Refresh in a minute." : x.status === "Scheduled" ? `Scheduled for <b>${esc(fmtDate(x.publishAt.date))} at ${esc(x.publishAt.time)}</b>. Change or cancel it in Publer.` : `Posted ${esc(fmtDate(x.postedAt?.date))} at ${esc(x.postedAt?.time || "")}.`}</div>
+      ${links ? `<div>${links}</div>` : ""}
+      <div class="kv" style="margin-top:8px">Caption</div><div class="pre">${esc(x.caption)}</div>
+    </div>`;
+  } else {
+    const opts = [...ath.values()].filter((a) => a.name && !s.athletes.includes(a.id)).sort((a, b) => a.name.localeCompare(b.name));
+    body = `<form id="schedForm" style="display:flex;flex-direction:column;gap:22px" novalidate>
+      <div class="field">
+        <label for="pubCaption">Caption</label>
+        <textarea class="input" id="pubCaption" rows="5" maxlength="2200">${esc(x.caption)}</textarea>
+        <div class="check-row"><span class="hint">From the editor's submission. Change it here if needed.</span><button type="button" class="btn ghost" data-act="checkCaption" data-for="pubCaption">Check caption</button></div>
+        <div id="pubCaptionCheck"></div>
+      </div>
+      <div class="field">
+        <span class="flabel">Channels</span>
+        <div class="chips" role="group" aria-label="Channels">${ALL_CHANNELS.map((c) => `<button type="button" class="chip-btn ${s.channels.includes(c) ? "on" : ""}" data-act="toggleCh" data-v="${c}" aria-pressed="${s.channels.includes(c)}">${c}</button>`).join("")}</div>
+      </div>
+      <div class="field">
+        <span class="flabel">When (Vienna time)</span>
+        ${free.length ? `<div class="chips" role="group" aria-label="Free slots">${free.map((f) => `<button type="button" class="chip-btn ${slotKey(f) === slotKey(start) ? "on" : ""}" data-act="pickSlot" data-d="${f.date}" data-t="${f.time}">${esc(fmtDate(f.date))} ${f.time}</button>`).join("")}</div>` : ""}
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          <input class="input" style="flex:1 1 180px;width:auto" type="date" id="pubDate" value="${esc(start.date)}" min="${esc(now.date)}" aria-label="Day">
+          <input class="input" style="flex:1 1 130px;width:auto" type="time" id="pubTime" value="${esc(start.time)}" step="300" aria-label="Time">
+        </div>
+        <div id="flowNote" class="small" style="display:flex;flex-direction:column;gap:2px"></div>
+        <label class="check"><input type="checkbox" id="pubDraft"><span>No time yet: send it to Publer as a draft</span></label>
+      </div>
+      <div class="field">
+        <span class="flabel">Collaborators on Instagram</span>
+        <div class="chips" id="athChips">${s.athletes.map((aid) => `<button type="button" class="chip-btn on" data-act="delAth" data-v="${esc(aid)}" aria-label="Remove ${esc(ath.get(aid)?.name || "athlete")}">${esc(ath.get(aid)?.name || "Athlete")} ×</button>`).join("") || `<span class="small muted">No athletes yet.</span>`}</div>
+        <select class="input" id="athAdd" aria-label="Add an athlete"><option value="">Add an athlete…</option>${opts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}${a.handle ? ` (@${esc(a.handle)})` : ""}</option>`).join("")}</select>
+        <input class="input" id="pubExtra" placeholder="Other Instagram handles, comma separated (up to 3)" value="${esc(x.extra)}" aria-label="Other Instagram handles">
+      </div>
+      <div class="field">
+        <label for="pubTrial">Instagram</label>
+        <select class="input" id="pubTrial">${TRIALS.map(([v, l]) => `<option value="${esc(v)}" ${x.trial === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+      </div>
+      <div class="error hidden" id="schedError" role="alert"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
+        <button class="btn" type="submit" id="schedBtn">Schedule</button>
+        <span class="hint">Publer gets it within a minute or two. Change or cancel it later in Publer.</span>
+      </div>
+    </form>`;
+  }
+  app.innerHTML = shell("publish", `${head}
+    <div class="row">
+      <div class="player">${player}${x.status === "Failed" && x.log ? `<div class="quote"><b>Last try failed</b>${esc(x.log)}</div>` : ""}</div>
+      <section class="card grow" aria-label="Schedule">${body}</section>
+    </div>`);
+  updateFlow();
+}
+
+// Shows the post before and after the chosen time, and warns when the feed would repeat itself.
+function updateFlow() {
+  const el = document.getElementById("flowNote");
+  const d = teamData("pub"), s = state.sched;
+  if (!el || !d || !s) return;
+  if (document.getElementById("pubDraft")?.checked) { el.innerHTML = ""; return; }
+  const date = document.getElementById("pubDate").value, time = document.getElementById("pubTime").value;
+  if (!date || !time) { el.innerHTML = ""; return; }
+  const k = `${date} ${time}`;
+  const x = [...d.ready, ...d.scheduled].find((v) => v.id === s.id);
+  const ath = new Map(d.athletes.map((a) => [a.id, a]));
+  (x?.athletes || []).forEach((a) => { if (!ath.has(a.id)) ath.set(a.id, a); });
+  const cur = { ...x, athletes: s.athletes.map((id) => ath.get(id)).filter(Boolean) };
+  const tl = timeline(d).filter((e) => e.item.id !== s.id);
+  const before = tl.filter((e) => slotKey(e) < k).pop(), after = tl.find((e) => slotKey(e) > k), same = tl.find((e) => slotKey(e) === k);
+  const line = (label, e) => `<span class="muted">${label}: ${esc(fmtDate(e.date))} ${esc(e.time)} · ${esc(clipText(e.item.title, 56))}</span>`;
+  el.innerHTML = [
+    same ? `<span class="flow-warn">${esc(clipText(same.item.title, 56))} is already at this time.</span>` : "",
+    before ? line("Before", before) : "",
+    after ? line("After", after) : "",
+    ...[flowIssue(before?.item, cur), flowIssue(cur, after?.item)].filter(Boolean).map((t) => `<span class="flow-warn">${esc(t)}</span>`),
+  ].filter(Boolean).join("");
+}
+
+async function scheduleOne() {
+  const s = state.sched;
+  const err = document.getElementById("schedError"), btn = document.getElementById("schedBtn");
+  const val = (id) => (document.getElementById(id)?.value || "").trim();
+  const fail = (m) => { err.textContent = m; err.classList.remove("hidden"); };
+  err.classList.add("hidden");
+  const caption = val("pubCaption"), draft = document.getElementById("pubDraft").checked, date = val("pubDate"), time = val("pubTime");
+  if (!caption) return fail("Add the caption.");
+  if (!s.channels.length) return fail("Pick at least one channel.");
+  if (!draft && (!date || !time)) return fail("Pick a day and a time, or send it as a draft.");
+  const extra = val("pubExtra").split(/[,\s]+/).filter(Boolean);
+  if (extra.length > 3) return fail("Up to 3 other Instagram handles.");
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    await api("publish-schedule", { id: s.id, caption, channels: s.channels, athleteIds: s.athletes, extra: extra.join(", "), trial: val("pubTrial"), draft, date, time });
+    state.sched = null;
+    teamDrop("pub", "overview");
+    toast(draft ? "Sent to Publer as a draft." : `Scheduled for ${fmtDate(date)} at ${time}. Publer gets it in a minute or two.`);
+    go("#/publish");
+  } catch (x) { fail(x.message); btn.disabled = false; btn.textContent = draft ? "Send as draft" : "Schedule"; }
+}
+
+/* --- Insights --- */
+function barChart(points, unit) {
+  const vals = points.map((p) => Number(p.value) || 0);
+  const max = Math.max(1, ...vals);
+  let best = -1, lastFull = -1;
+  points.forEach((p, i) => { if (!p.current && p.value != null) { lastFull = i; if (best < 0 || vals[i] > vals[best]) best = i; } });
+  const bars = points.map((p, i) => {
+    const h = p.value ? Math.max(2, Math.round((vals[i] / max) * 100)) : 0;
+    const tip = p.value == null ? `${p.long}: no videos` : `${p.long}: typical video ${nf(p.value)} ${unit} · ${plural(p.posts, "video", "videos")}${p.current ? " · still collecting views" : ""}`;
+    return `<div class="bar ${p.current ? "cur" : ""} ${i === best ? "best" : ""}" tabindex="0" role="img" aria-label="${esc(tip)}" data-tip="${esc(tip)}">
+      ${h ? `<div class="b" style="height:${h}%"></div>` : ""}
+      ${h && (i === best || i === lastFull) ? `<span class="v" style="bottom:calc(${h}% + 4px)">${esc(kfmt(p.value))}</span>` : ""}
+    </div>`;
+  }).join("");
+  const every = points.length > 14 ? 7 : window.innerWidth < 640 ? 3 : 1;
+  const labels = points.map((p, i) => `<span>${(points.length - 1 - i) % every === 0 ? esc(p.label) : ""}</span>`).join("");
+  return `<div class="bars">${bars}</div><div class="xlabels" aria-hidden="true">${labels}</div>
+    <div class="readout small muted" id="readout" role="status">${points[lastFull] ? esc(`${points[lastFull].long}: typical video ${nf(points[lastFull].value)} ${unit}. Orange is the best, striped is still collecting views. Hover or tap a bar for its numbers.`) : "No videos with numbers yet."}</div>`;
+}
+
+function renderInsights() {
+  const ch = state.channel;
+  const d = teamData("ins:" + ch);
+  const seg = `<div class="seg" role="group" aria-label="Channel">${NETS.map(([k, l]) => `<button class="${ch === k ? "on" : ""}" data-act="insChannel" data-v="${k}" aria-pressed="${ch === k}">${l}</button>`).join("")}</div>`;
+  const hero = (right) => `<div class="hero">
+      <div>
+        <div class="eyebrow">Insights · team only</div>
+        <h1 class="head">Insights</h1>
+        <p>The typical video is the middle one: half did better, half did worse. One viral post doesn't move it. That's the number to push up.</p>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">${right}</div>
+    </div>`;
+  if (!d.connected) {
+    app.innerHTML = shell("insights", `${hero("")}<section class="card"><h2>Publer isn't connected</h2><p class="muted">Add the Publer API key as the PUBLER_API_KEY secret in Supabase, then reload this page.</p></section>`);
+    return;
+  }
+  const unit = d.metric === "reach" ? "reach" : "views";
+  const k = d.kpis, wk = d.weeks;
+  const lastW = wk[wk.length - 2], prevW = wk[wk.length - 3];
+  const change = lastW?.typical && prevW?.typical ? Math.round((lastW.typical / prevW.typical - 1) * 100) : null;
+  const first = wk.findIndex((w) => w.posts > 0);
+  const points = state.range === "days"
+    ? d.days.map((x) => { const dd = parseDay(x.date); return { label: `${dd.getDate()} ${MON[dd.getMonth()]}`, long: fmtDate(x.date), value: x.typical, posts: x.posts, current: x.current }; })
+    : wk.map((x) => { const dd = parseDay(x.start); return { label: `${dd.getDate()} ${MON[dd.getMonth()]}`, long: `Week of ${dd.getDate()} ${MON[dd.getMonth()]}`, value: x.typical, posts: x.posts, current: x.current }; });
+  const top = d.top.map((p) => {
+    const t = thumbUrl(p.video?.videoUrl || "");
+    const meta = [fmtDate(p.date), p.video?.editor, p.video?.template?.name].filter(Boolean).join(" · ");
+    return `<div class="vrow">
+      ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
+      <div class="vinfo"><div class="vt">${esc(p.caption || p.video?.title || "(no caption)")}</div><div class="small muted">${esc(meta)}${p.link ? ` · <a href="${esc(p.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>
+      <div style="text-align:right;min-width:120px"><div class="head" style="font-size:22px;line-height:1.1">${nf(p.value)}</div><div class="small muted">${p.x != null ? `${p.x}× typical` : ""}${p.shares1k != null ? ` · ${p.shares1k} shares per 1,000` : ""}</div></div>
+    </div>`;
+  }).join("");
+  const tplRows = d.byTemplate.map((t) => `<tr>
+      <td>${esc(t.name)}</td><td>${levelBadge(t.level)}</td><td class="n">${t.posts}</td><td class="n">${nf(t.typical)}</td>
+      <td class="n">${t.shares1k ?? "–"}</td><td class="n">${t.pay != null ? money(t.pay) : "–"}</td><td class="n">${t.costPer1k != null ? usd2(t.costPer1k) : "–"}</td></tr>`).join("");
+  const onlyOwn = d.byTemplate.every((t) => t.id === "own");
+  app.innerHTML = shell("insights", `
+    ${hero(`${seg}<button class="btn ghost" data-act="insRefresh">Refresh</button>`)}
+    ${ch === "tiktok" ? `<p class="small muted" style="margin:-8px 0 0">Publer gives TikTok reach, not views, so compare TikTok only with TikTok.</p>` : ""}
+    <div class="tiles">
+      <div class="tile"><span class="lbl">Typical video last week</span><span class="num">${nf(k.typicalLastWeek)}</span><span class="sub">${change != null ? `${change >= 0 ? "+" : ""}${change}% on the week before` : unit}</span></div>
+      <div class="tile"><span class="lbl">Typical video, 4 weeks</span><span class="num">${nf(k.typical4w)}</span><span class="sub">${plural(k.posts4w, "video", "videos")} · ${nf(k.views4w)} ${unit} in total</span></div>
+      <div class="tile"><span class="lbl">Shares per 1,000 ${unit}</span><span class="num">${k.shares1k ?? "–"}</span><span class="sub">Last 4 weeks · likes per 1,000: ${k.likes1k ?? "–"}</span></div>
+      <div class="tile"><span class="lbl">This week so far</span><span class="num">${nf(k.typicalThisWeek)}</span><span class="sub">Typical video, still collecting views</span></div>
+    </div>
+    <section class="card" aria-label="Typical video over time">
+      <div class="card-head"><h2>Typical video per ${state.range === "days" ? "day" : "week"}</h2>
+        <div class="seg" role="group" aria-label="Range"><button class="${state.range === "weeks" ? "on" : ""}" data-act="insRange" data-v="weeks" aria-pressed="${state.range === "weeks"}">12 weeks</button><button class="${state.range === "days" ? "on" : ""}" data-act="insRange" data-v="days" aria-pressed="${state.range === "days"}">28 days</button></div>
+      </div>
+      ${barChart(points, unit)}
+      ${first > 0 ? `<p class="small muted" style="margin:10px 0 0">Publer has numbers from the week of ${esc(dayLabel(wk[first].start))} on, when posting through Publer started.</p>` : ""}
+    </section>
+      <section class="card" aria-label="Best videos">
+        <div class="card-head" style="margin-bottom:6px"><h2>Best videos, last 30 days</h2></div>
+        ${top || `<div class="empty">No videos with numbers yet.</div>`}
+      </section>
+        <section class="card" aria-label="By template">
+          <div class="card-head" style="margin-bottom:10px"><h2>By template, last 90 days</h2></div>
+          <div class="scroll-x"><table class="tt"><thead><tr><th>Template</th><th>Level</th><th class="n">Videos</th><th class="n">Typical</th><th class="n">Shares /1k</th><th class="n">Pay</th><th class="n">Cost /1k ${unit}</th></tr></thead><tbody>${tplRows || `<tr><td colspan="7" class="muted">No matched videos yet.</td></tr>`}</tbody></table></div>
+          ${onlyOwn ? `<p class="small muted" style="margin:12px 0 0">Once videos made with templates go live, this shows which template gets the most ${unit} per dollar.</p>` : ""}
+        </section>
+    <p class="small muted" style="margin:0">Numbers from Publer, updated ${esc(viennaStamp(d.refreshedAt))} (Vienna). They refresh every few hours.</p>`);
+}
+
+/* --- Templates (plan and price) --- */
+function tplStatus(t) {
+  if (!t.active) return `<span class="badge b-sub">Off</span>`;
+  return t.live ? `<span class="badge b-live">Live for editors</span>` : `<span class="badge b-team">Team only</span>`;
+}
+
+function renderTeamTemplates() {
+  const d = teamData("tpl");
+  const list = d.templates.slice().sort((a, b) => Number(b.active) - Number(a.active));
+  const active = list.filter((t) => t.active);
+  const live = active.filter((t) => t.live).length;
+  const open = active.reduce((s, t) => s + (Number(t.open) || 0), 0);
+  const budget = active.reduce((s, t) => s + (Number(t.open) || 0) * (Number(t.pay) || 0), 0);
+  const rows = list.map((t) => `<tr>
+      <td><a href="#/team-templates/${esc(t.id)}">${esc(t.name)}</a>${t.sound ? `<div class="small muted">Sound: ${esc(clipText(t.sound, 70))}</div>` : ""}</td>
+      <td>${levelBadge(t.level)}</td><td>${tplStatus(t)}</td>
+      <td class="n">${t.pay != null ? money(t.pay) : `<span class="zero">–</span>`}</td>
+      <td class="n">${t.needed ?? "–"}</td><td class="n">${t.made ?? 0}</td><td class="n">${t.open ?? "–"}</td>
+      <td class="n">${nf(t.typical)}</td><td class="n">${t.costPer1k != null ? usd2(t.costPer1k) : "–"}</td></tr>`).join("");
+  app.innerHTML = shell("ttpl", `
+    <div class="hero">
+      <div>
+        <div class="eyebrow">Templates · team only</div>
+        <h1 class="head">Templates</h1>
+        <p>Plan which videos we need and what each pays. Editors only see a template once it's live for them.</p>
+      </div>
+      <a class="btn" href="#/team-templates/new">New template</a>
+    </div>
+    <div class="tiles">
+      <div class="tile"><span class="lbl">Active</span><span class="num">${active.length}</span><span class="sub">templates</span></div>
+      <div class="tile"><span class="lbl">Live for editors</span><span class="num">${live}</span><span class="sub">${live ? "editors see these" : "editors see none yet"}</span></div>
+      <div class="tile"><span class="lbl">Videos still needed</span><span class="num">${open}</span><span class="sub">across active templates</span></div>
+      <div class="tile"><span class="lbl">Budget for those</span><span class="num">${money(Math.round(budget * 100) / 100)}</span><span class="sub">${active.some((t) => t.pay == null) ? "templates without a pay are left out" : "at the template pay"}</span></div>
+    </div>
+    <section class="card" aria-label="How to price">
+      <div class="card-head" style="margin-bottom:12px"><h2>How to price</h2></div>
+      <div class="levels3">${LEVEL_INFO.map(([l, txt]) => `<div>${levelBadge(l)}<span>${esc(txt)}</span></div>`).join("")}</div>
+      <p class="small muted" style="margin:14px 0 0">Price by the work: every extra angle means more footage to find and more cuts. Once videos are live, cost per 1,000 views shows which templates earn their price.</p>
+    </section>
+    <section class="card" aria-label="All templates">
+      <div class="card-head" style="margin-bottom:10px"><h2>All templates</h2><span class="small muted">Typical views and cost: Instagram, last 90 days</span></div>
+      <div class="scroll-x"><table class="tt"><thead><tr><th>Template</th><th>Level</th><th>Status</th><th class="n">Pay</th><th class="n">Needed</th><th class="n">Made</th><th class="n">Open</th><th class="n">Typical views</th><th class="n">Cost /1k views</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="9" class="muted">No templates yet.</td></tr>`}</tbody></table></div>
+    </section>`);
+}
+
+function renderTemplateEdit(id) {
+  const d = teamData("tpl");
+  const isNew = id === "new";
+  const t = isNew ? { id: "", name: "", level: "Simple", pay: null, needed: null, example: "", brief: "", textOnScreen: "", caption: "", music: "", sound: "", active: true, live: false, made: 0, open: null }
+    : d.templates.find((x) => x.id === id);
+  const back = `<a class="back" href="#/team-templates">${ARROW} Templates</a>`;
+  if (!t) { app.innerHTML = shell("ttpl", `${back}<section class="card"><div class="empty">That template isn't in Airtable any more.</div></section>`); return; }
+  const ta = (fid, label, val, hint, rows = 4, max = 2000) => `<div class="field"><label for="${fid}">${label}</label>${hint ? `<span class="hint">${hint}</span>` : ""}<textarea class="input" id="${fid}" rows="${rows}" maxlength="${max}">${esc(val)}</textarea></div>`;
+  const levels = (d.levels || ["Simple", "Medium", "Advanced"]).map((l) => `<label><input type="radio" name="tplLevel" value="${esc(l)}" ${t.level === l ? "checked" : ""}><b>${esc(l)}</b><span class="small muted">${esc(LEVEL_INFO.find((x) => x[0] === l)?.[1] || "")}</span></label>`).join("");
+  app.innerHTML = shell("ttpl", `${back}
+    <div class="vhead" style="display:flex;flex-direction:column;gap:8px"><div class="eyebrow">Templates</div><h1 class="head">${isNew ? "New template" : esc(t.name)}</h1></div>
+    <div class="row">
+      <section class="card grow" aria-label="Template">
+        <form id="tplForm" data-id="${esc(t.id)}" style="display:flex;flex-direction:column;gap:22px" novalidate>
+          <div class="field"><label for="tplName">Name</label><input class="input" id="tplName" maxlength="80" value="${esc(t.name)}" placeholder="One-shot slow-mo dive"></div>
+          <div class="field"><span class="flabel">Level</span><div class="lvl" role="radiogroup" aria-label="Level">${levels}</div></div>
+          <div class="form2">
+            <div class="field"><label for="tplPay">Pay per video (USD)</label><input class="input" id="tplPay" type="number" min="0" max="100" step="0.5" inputmode="decimal" value="${t.pay ?? ""}" placeholder="Editor's own rate"></div>
+            <div class="field"><label for="tplNeeded">Videos needed</label><input class="input" id="tplNeeded" type="number" min="0" max="500" step="1" inputmode="numeric" value="${t.needed ?? ""}" placeholder="No limit"></div>
+          </div>
+          <div class="field"><label for="tplExample">Example video</label><input class="input" id="tplExample" type="url" maxlength="1000" value="${esc(t.example)}" placeholder="https://www.instagram.com/reel/…"></div>
+          ${ta("tplBrief", "Steps", t.brief, "What the editor does, one step per line.", 6, 4000)}
+          ${ta("tplText", "Text on screen", t.textOnScreen, "", 3)}
+          ${ta("tplCaption", "Caption", t.caption, "", 3)}
+          <div class="field"><label for="tplMusic">Music</label><input class="input" id="tplMusic" maxlength="300" value="${esc(t.music)}" placeholder="Slow cinematic track from Artlist, no beat cuts"></div>
+          ${ta("tplSound", "Sound", t.sound, "What people hear besides the music: the coach on the radio, the judges' scores, the splash, the crowd. Say where it comes in.", 3)}
+          <label class="check"><input type="checkbox" id="tplActive" ${t.active ? "checked" : ""}><span><b>Active</b><br><span class="muted">The team can pick it when submitting a test video.</span></span></label>
+          <label class="check"><input type="checkbox" id="tplLive" ${t.live ? "checked" : ""}><span><b>Live for editors</b><br><span class="muted">Editors see this template and its pay in their portal.</span></span></label>
+          <label class="check hidden" id="tplConfirmRow"><input type="checkbox" id="tplConfirm"><span style="color:var(--orange-soft)">Yes, editors may see this template and its pay now.</span></label>
+          <div class="error hidden" id="tplError" role="alert"></div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center"><button class="btn" type="submit" id="tplSave">${isNew ? "Create template" : "Save"}</button><a class="btn ghost" href="#/team-templates">Cancel</a></div>
+        </form>
+      </section>
+      ${isNew ? "" : `<div class="side"><section class="card" aria-label="Numbers">
+        <div class="card-head" style="margin-bottom:12px"><h2>Numbers</h2></div>
+        <div class="facts">
+          <div><div class="kv">Made</div><div class="v">${t.made ?? 0}</div></div>
+          <div><div class="kv">Still needed</div><div class="v">${t.open ?? "–"}</div></div>
+          <div><div class="kv">Typical views</div><div class="v">${nf(t.typical)}</div></div>
+          <div><div class="kv">Cost per 1,000 views</div><div class="v">${t.costPer1k != null ? usd2(t.costPer1k) : "–"}</div></div>
+        </div>
+        <p class="small muted" style="margin:14px 0 0">Instagram, last 90 days. Shows once videos made with this template are live.</p>
+      </section></div>`}
+    </div>`);
+}
+
+async function saveTemplate(form) {
+  const err = document.getElementById("tplError"), btn = document.getElementById("tplSave");
+  const val = (id) => (document.getElementById(id)?.value || "").trim();
+  const on = (id) => !!document.getElementById(id)?.checked;
+  const fail = (m) => { err.textContent = m; err.classList.remove("hidden"); };
+  err.classList.add("hidden");
+  const id = form.dataset.id;
+  const was = id ? teamData("tpl").templates.find((t) => t.id === id) : null;
+  const name = val("tplName"), level = form.querySelector('input[name="tplLevel"]:checked')?.value || "";
+  if (!name) { document.getElementById("tplName").focus(); return fail("Give the template a name."); }
+  if (!level) return fail("Pick a level.");
+  const pay = val("tplPay"), needed = val("tplNeeded"), example = val("tplExample");
+  if (pay && !(Number(pay) >= 0 && Number(pay) <= 100)) return fail("Pay must be a number between 0 and 100.");
+  if (needed && !(Number.isInteger(Number(needed)) && Number(needed) >= 0 && Number(needed) <= 500)) return fail("Videos needed must be a whole number between 0 and 500.");
+  if (example && !/^https:\/\/\S+$/i.test(example)) return fail("The example must be a link starting with https://.");
+  const live = on("tplLive");
+  if (live && !was?.live && !on("tplConfirm")) return fail("Tick the box to confirm editors may see this template and its pay.");
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    await api("template-save", { id, name, level, pay, needed, example, brief: val("tplBrief"), textOnScreen: val("tplText"), caption: val("tplCaption"), music: val("tplMusic"), sound: val("tplSound"), active: on("tplActive"), live, confirmLive: on("tplConfirm") });
+    teamDrop("tpl", "overview");
+    if (isEditor()) state.data = null;
+    toast(id ? "Saved." : "Template created.");
+    go("#/team-templates");
+  } catch (x) { fail(x.message); btn.disabled = false; btn.textContent = id ? "Save" : "Create template"; }
+}
+
 /* ---------- events ---------- */
 app.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (e.target.id === "schedForm") return scheduleOne();
+  if (e.target.id === "tplForm") return saveTemplate(e.target);
   if (e.target.id === "emailForm") {
     const email = document.getElementById("email").value.trim();
     const err = document.getElementById("loginError");
@@ -1264,8 +1927,49 @@ app.addEventListener("keydown", (e) => {
   if (e.target.id === "nText" && e.key === "Enter") { e.preventDefault(); addNote(); }
 });
 
+// Re-draws the schedule form (after adding or removing an athlete) without losing what was typed.
+function keepForm(redraw) {
+  const ids = ["pubCaption", "pubDate", "pubTime", "pubExtra", "pubTrial"];
+  const vals = Object.fromEntries(ids.map((i) => [i, document.getElementById(i)?.value]));
+  const draft = !!document.getElementById("pubDraft")?.checked;
+  const check = document.getElementById("pubCaptionCheck")?.innerHTML || "";
+  redraw();
+  ids.forEach((i) => { const el = document.getElementById(i); if (el && vals[i] != null) el.value = vals[i]; });
+  const box = document.getElementById("pubCaptionCheck"); if (box) box.innerHTML = check;
+  const dr = document.getElementById("pubDraft");
+  if (dr && draft) { dr.checked = true; dr.dispatchEvent(new Event("change", { bubbles: true })); }
+  syncSlots();
+}
+function syncSlots() {
+  const dt = document.getElementById("pubDate"), tm = document.getElementById("pubTime");
+  if (!dt || !tm) return;
+  app.querySelectorAll('[data-act="pickSlot"]').forEach((b) => b.classList.toggle("on", b.dataset.d === dt.value && b.dataset.t === tm.value));
+  updateFlow();
+}
+
+// Insights chart: the numbers of the bar under the pointer or keyboard focus.
+const showTip = (e) => { const b = e.target.closest?.("[data-tip]"); const out = document.getElementById("readout"); if (b && out) out.textContent = b.dataset.tip; };
+app.addEventListener("mouseover", showTip);
+app.addEventListener("focusin", showTip);
+
 app.addEventListener("change", (e) => {
-  if (e.target.id === "tpl") document.getElementById("tplHint").innerHTML = tplHint(e.target.value);
+  const id = e.target.id;
+  if (id === "athAdd" && e.target.value && state.sched) {
+    if (!state.sched.athletes.includes(e.target.value)) state.sched.athletes.push(e.target.value);
+    keepForm(() => renderSchedule(state.sched.id));
+  }
+  if (id === "pubDate" || id === "pubTime") syncSlots();
+  if (id === "pubDraft") {
+    const off = e.target.checked;
+    ["pubDate", "pubTime"].forEach((x) => { document.getElementById(x).disabled = off; });
+    document.getElementById("schedBtn").textContent = off ? "Send as draft" : "Schedule";
+    updateFlow();
+  }
+  if (id === "tplLive") {
+    const was = teamData("tpl")?.templates.find((t) => t.id === document.getElementById("tplForm").dataset.id);
+    document.getElementById("tplConfirmRow").classList.toggle("hidden", !e.target.checked || !!was?.live);
+  }
+  if (id === "tpl") document.getElementById("tplHint").innerHTML = tplHint(e.target.value);
   if (e.target.id === "file" && e.target.files[0]) {
     startUpload(e.target.files[0], "drop", (u) => { state.upload = u; document.getElementById("drop").innerHTML = uploadedBox(u, "clearUpload"); });
   }
@@ -1308,6 +2012,37 @@ app.addEventListener("click", async (e) => {
   }
   if (act === "retry") render();
   if (act === "rtab") { state.rtab = el.dataset.v; renderQueue(); }
+  // Team area
+  if (act === "makePlan") { state.plan = makePlan(teamData("pub")); renderPublish(); }
+  if (act === "clearPlan") { state.plan = null; renderPublish(); }
+  if (act === "runPlan" && !state.planRunning) runPlan();
+  if (act === "reloadPub") {
+    el.disabled = true;
+    try { await teamGet("pub", "publish-queue", {}, true); state.plan = null; renderPublish(); } catch (x) { toast(x.message); el.disabled = false; }
+  }
+  if (act === "toggleCh" && state.sched) {
+    const c = el.dataset.v, list = state.sched.channels;
+    state.sched.channels = list.includes(c) ? list.filter((x) => x !== c) : ALL_CHANNELS.filter((x) => x === c || list.includes(x));
+    el.classList.toggle("on"); el.setAttribute("aria-pressed", String(state.sched.channels.includes(c)));
+  }
+  if (act === "pickSlot") {
+    document.getElementById("pubDate").value = el.dataset.d;
+    document.getElementById("pubTime").value = el.dataset.t;
+    const dr = document.getElementById("pubDraft");
+    if (dr.checked) { dr.checked = false; dr.dispatchEvent(new Event("change", { bubbles: true })); }
+    syncSlots();
+  }
+  if (act === "delAth" && state.sched) {
+    state.sched.athletes = state.sched.athletes.filter((x) => x !== el.dataset.v);
+    keepForm(() => renderSchedule(state.sched.id));
+  }
+  if (act === "insChannel") { state.channel = el.dataset.v; render(); }
+  if (act === "insRange") { state.range = el.dataset.v; renderInsights(); }
+  if (act === "insRefresh") {
+    el.disabled = true; el.textContent = "Refreshing…";
+    try { await teamGet("ins:" + state.channel, "insights", { channel: state.channel, refresh: true }, true); Object.keys(teamCache()).filter((k) => k.startsWith("ins:") && k !== "ins:" + state.channel).forEach((k) => teamDrop(k)); renderInsights(); toast("Numbers updated from Publer."); }
+    catch (x) { toast(x.message); el.disabled = false; el.textContent = "Refresh"; }
+  }
   if (act === "reloadQueue") {
     el.disabled = true;
     try { await ensureQueue(true); renderQueue(); } catch (x) { toast(x.message); el.disabled = false; }
@@ -1337,6 +2072,7 @@ app.addEventListener("click", async (e) => {
     try {
       await api("review", { id, decision, notes });
       delete state.drafts[id];
+      teamDrop("overview", "pub");
       await ensureQueue(true);
       if (isEditor()) state.data = null;
       const next = state.queue.find((x) => (x.status === "Submitted" || x.status === "In Review") && x.id !== id);
@@ -1468,6 +2204,7 @@ function mockApi(action, payload) {
       { id: "recSampleTpl00003", name: "Athlete intro", level: "Simple", pay: null, needed: null, open: null, full: false, live: false, example: "",
         brief: "1. Best dive of the athlete, one angle.\n2. Name and country on screen in the first second.\n3. 8 to 12 seconds.", textOnScreen: "Name and country, first second only.", caption: "", music: "" },
     ];
+    window.__mockTpl = T.map((t, i) => ({ ...t, active: true, sound: i === 0 ? "Wind at the top, then only the splash. No voice." : "", made: [4, 4, 0][i] }));
     // ?tpl=0 shows what an editor sees while no template is live for them.
     window.__mock.templates = role === "reviewer" || new URLSearchParams(location.search).get("tpl") === "0" ? [] : T;
     // The latest videos were made from templates.
@@ -1499,8 +2236,104 @@ function mockApi(action, payload) {
       return { ok: true };
     }
     if (action === "resubmit") { const v = window.__mock.videos.find((x) => x.id === payload.id); Object.assign(v, { status: "Submitted", feedback: "", caption: payload.caption }); return { ok: true }; }
+    const team = mockTeam(action, payload);
+    if (team) return team;
     return { ok: true };
   });
+}
+
+// Sample team data for ?mock: publishing queue, Today, templates and Insights (nothing is saved).
+function mockTeam(action, payload) {
+  if (!window.__team) {
+    const today = viennaNow().date, D = (n) => iso(addDays(parseDay(today), n));
+    const A = ["Jonah Genser", "Robin Steiner", "Reagan Popoff", "Rainhard Riede", "Robin Georges", "James Lichtenstein", "Osama Ali", "Iris Schmidbauer"]
+      .map((name, i) => ({ id: "recAthlete" + String(i).padStart(7, "0"), name, handle: name.toLowerCase().replace(/\s+/g, "") }));
+    const T = window.__mockTpl || [];
+    const tref = (i) => (T[i] ? { id: T[i].id, name: T[i].name, level: T[i].level, pay: T[i].pay } : null);
+    const at = (n, t) => ({ iso: `${D(n)}T${t}:00`, date: D(n), time: t });
+    const mk = (n, title, ath, extra = {}) => ({ id: "recPublish" + String(n).padStart(7, "0"), title, caption: "27 metres up, three seconds down. Who takes the title? 🏆", videoUrl: "https://res.cloudinary.com/os1vbtid/video/upload/v1/sample.mp4",
+      channels: [...ALL_CHANNELS], publishAt: null, status: "", sending: false, log: "", athletes: ath.map((i) => A[i]), extra: "", trial: "", template: null,
+      editor: ["Ralph Hepollo", "Mark Espejo", "Rian Magtaan"][n % 3], submitted: D(-24 + n * 2), postedAt: null, links: {}, ...extra });
+    const ready = [
+      mk(1, "Jonah Genser - Finals Day - Reel 02", [0]),
+      mk(2, "Robin Steiner - First Comp Day - Reel 04", [1], { template: tref(0) }),
+      mk(3, "Batch 2 - Reel 09 - Popoff and Riede", [2, 3]),
+      mk(4, "Batch 3 - Reel 1 - Rainhard Riede", [3], { status: "Failed", log: `${D(-3)} 07:00 · Publer: the video is longer than YouTube Shorts allow.` }),
+      mk(5, "Batch 3 - Reel 5 - Robin Georges", [4], { template: tref(0) }),
+      mk(6, "Batch 3 - Reel 9 - James Lichtenstein Podium", [5]),
+      mk(7, "Batch 4 - Reel 1 - Women's Podium", [7], { caption: "" }),
+      mk(8, "Riede, Popoff, Ali - Batch 2 - Reel 04", [3, 2, 6], { template: tref(1) }),
+      mk(9, "Batch 4 - Reel 5 - Freestyle Podium", [0, 4]),
+    ];
+    const scheduled = [
+      mk(20, "Batch 4 - Reel 8 - Podium + Dive", [1], { status: "Scheduled", publishAt: at(1, "07:00") }),
+      mk(21, "Batch 4 - Reel 10 - Before and After", [1], { status: "Scheduled", publishAt: at(1, "18:00") }),
+      mk(22, "Batch 2 - Reel 06 - Genser, Georges, Popoff", [0, 4, 2], { status: "Scheduled", publishAt: at(3, "07:00"), template: tref(1) }),
+    ];
+    const recent = [
+      mk(30, "Batch 3 - Reel 8 - Podium Celebration", [], { status: "Posted", postedAt: at(-1, "07:02"), links: { instagram: "https://www.instagram.com/", facebook: "https://www.facebook.com/" } }),
+      mk(31, "NLT Batch 4 - Reel 9 - Before and After", [2], { status: "Posted", postedAt: at(-2, "18:01"), links: { instagram: "https://www.instagram.com/" } }),
+      mk(32, "Batch 2 - Reel 10 - Riede", [3], { status: "Posted", postedAt: at(-3, "07:00"), links: { instagram: "https://www.instagram.com/", youtube: "https://www.youtube.com/" } }),
+    ];
+    window.__team = { A, T, today, pub: { ready, scheduled, recent } };
+  }
+  const tm = window.__team, copy = (x) => JSON.parse(JSON.stringify(x));
+  if (action === "publish-queue") return copy({ ...tm.pub, athletes: tm.A, slots: ["07:00", "18:00"], today: tm.today });
+  if (action === "publish-schedule") {
+    const x = tm.pub.ready.find((v) => v.id === payload.id);
+    if (!x) return Promise.reject(new Error("This video isn't waiting to be scheduled any more."));
+    Object.assign(x, { caption: payload.caption, channels: payload.channels, trial: payload.trial || "", extra: payload.extra || "" });
+    if (payload.athleteIds) x.athletes = payload.athleteIds.map((id) => tm.A.find((a) => a.id === id)).filter(Boolean);
+    if (payload.draft) { x.status = "Draft in Publer"; return { ok: true, draft: true }; }
+    tm.pub.ready = tm.pub.ready.filter((v) => v !== x);
+    Object.assign(x, { status: "Scheduled", publishAt: { iso: "", date: payload.date, time: payload.time } });
+    tm.pub.scheduled = [...tm.pub.scheduled, x].sort((a, b) => slotKey(a.publishAt).localeCompare(slotKey(b.publishAt)));
+    return { ok: true, draft: false };
+  }
+  if (action === "team-overview") {
+    const sch = tm.pub.scheduled, last = sch.length ? sch[sch.length - 1].publishAt.date : "";
+    const q = (window.__mockQueue || []).filter((v) => v.status === "Submitted" || v.status === "In Review");
+    const act = tm.T.filter((t) => t.active);
+    return copy({
+      reviewer: window.__mock.reviewer || { name: "Sample Reviewer", firstName: "Sample" }, today: tm.today,
+      review: { count: q.length, oldest: q[0]?.submitted || "", stuck: q.filter((v) => daysSince(v.submitted) >= 3).slice(0, 6).map((v) => ({ id: v.id, title: v.title, editor: v.editor, status: v.status, submitted: v.submitted })) },
+      publish: { ready: tm.pub.ready.length, oldestReady: tm.pub.ready[0]?.submitted || "", scheduled: sch, plannedUntil: last, daysPlanned: last ? Math.round((parseDay(last) - parseDay(tm.today)) / 86400000) : 0, failed: tm.pub.ready.filter((x) => x.status === "Failed").length },
+      pay: { nextPayday: window.__mock.nextPayday, owed: 48, owedVideos: 6 },
+      templates: { active: act.length, live: act.filter((t) => t.live).length, open: act.reduce((s, t) => s + (Number(t.open) || 0), 0) },
+      week: { from: "", to: "", posts: 9, views: 41200, typical: 3150, best: { caption: "Maybe the perfect shot does exist… 🍿", views: 66625, link: "https://www.instagram.com/", video: { title: "Batch 3 - Reel 1", videoUrl: "", editor: "Ralph Hepollo", template: null, athletes: ["Rainhard Riede"] } } },
+      publerConnected: true,
+    });
+  }
+  if (action === "team-templates") {
+    const stats = [[6, 4200], [4, 2900]];
+    return copy({ templates: tm.T.map((t, i) => { const [posted, typical] = stats[i] || [0, null]; return { ...t, posted, typical, costPer1k: t.pay != null && typical ? Math.round((t.pay / typical) * 100000) / 100 : null }; }), levels: ["Simple", "Medium", "Advanced"] });
+  }
+  if (action === "template-save") {
+    const fields = { name: payload.name, level: payload.level, pay: payload.pay === "" ? null : Number(payload.pay), needed: payload.needed === "" ? null : Number(payload.needed), example: payload.example, brief: payload.brief, textOnScreen: payload.textOnScreen, caption: payload.caption, music: payload.music, sound: payload.sound, active: payload.active, live: payload.live };
+    const t = tm.T.find((x) => x.id === payload.id);
+    if (t) Object.assign(t, fields, { open: fields.needed == null ? null : Math.max(0, fields.needed - (t.made || 0)) });
+    else tm.T.push({ id: "recSampleTpl" + String(tm.T.length + 1).padStart(5, "0"), made: 0, open: fields.needed, full: false, ...fields });
+    return { ok: true };
+  }
+  if (action === "insights") {
+    const ch = payload.channel || "instagram";
+    const scale = { instagram: 1, facebook: 0.35, tiktok: 0.6, youtube: 0.25 }[ch] || 1;
+    const today = parseDay(viennaNow().date), mon = weekStart(today);
+    const base = [null, null, null, 2100, 2400, 2250, 2600, 2900, 2700, 3100, 3300, 1200];
+    const weeks = base.map((b, i) => { const s = addDays(mon, -7 * (11 - i)); const cur = i === 11; const typ = b == null ? null : Math.round(b * scale); const posts = b == null ? 0 : cur ? 2 : 9 + (i % 3); return { start: iso(s), end: iso(addDays(s, 6)), posts, typical: typ, total: typ ? typ * posts * 2 : 0, current: cur }; });
+    const days = Array.from({ length: 28 }, (_, i) => { const has = i % 4 !== 3; const typ = Math.round((2300 + ((i * 37) % 11) * 150) * scale); return { date: iso(addDays(today, -(27 - i))), posts: has ? 1 + (i % 2) : 0, typical: has ? (i >= 26 ? Math.round(typ * 0.45) : typ) : null, current: i >= 26 }; });
+    const caps = ["Maybe the perfect shot does exist… 🍿", "Came for the jumps, stayed for the people. 🫶🏽", "Some things make sense only after you experience them.", "Every movement matters when the moment comes.", "27 metres. Three seconds. One shot.", "Podium day in Tyrol 🏆"];
+    const typ30 = Math.round(3150 * scale);
+    const top = caps.map((c, i) => { const v = Math.round([66625, 21400, 12950, 8800, 6100, 4900][i] * scale); return { id: "p" + i, caption: c, date: iso(addDays(today, -3 - i * 4)), link: "https://www.instagram.com/", value: v, x: Math.round((v / typ30) * 10) / 10, shares1k: [1.8, 2.4, 1.1, 0.9, 1.6, 0.7][i], likes1k: 40 + i, video: i % 2 ? null : { title: "Batch " + (3 + i), videoUrl: "", editor: "Ralph Hepollo", template: i === 2 ? tm.T[0] && { id: tm.T[0].id, name: tm.T[0].name, pay: tm.T[0].pay, level: tm.T[0].level } : null, athletes: [] } }; });
+    const byTemplate = [
+      { id: tm.T[0]?.id, name: tm.T[0]?.name, level: tm.T[0]?.level, pay: tm.T[0]?.pay, posts: 6, typical: Math.round(4200 * scale), shares1k: 2.1 },
+      { id: "own", name: "Own idea", level: "", pay: null, posts: 21, typical: typ30, shares1k: 1.3 },
+      { id: tm.T[1]?.id, name: tm.T[1]?.name, level: tm.T[1]?.level, pay: tm.T[1]?.pay, posts: 4, typical: Math.round(2900 * scale), shares1k: 1.0 },
+    ].filter((t) => t.id).map((t) => ({ ...t, costPer1k: t.pay != null && t.typical ? Math.round((t.pay / t.typical) * 100000) / 100 : null }));
+    return copy({ connected: true, network: ch, metric: ch === "tiktok" ? "reach" : "views", refreshedAt: new Date(Date.now() - 40 * 60000).toISOString(),
+      kpis: { typicalThisWeek: weeks[11].typical, typicalLastWeek: weeks[10].typical, typical4w: typ30, posts4w: 38, views4w: Math.round(152000 * scale), shares1k: 1.4, likes1k: 41 }, weeks, days, top, byTemplate });
+  }
+  return null;
 }
 
 render();
