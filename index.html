@@ -1398,7 +1398,7 @@ function renderTeam() {
     </div>
     <div class="tiles">
       <a class="tile ${oldest >= 3 ? "warn" : ""}" href="#/review"><span class="lbl">To review</span><span class="num">${r.count}</span><span class="sub">${r.count ? `Oldest waiting ${esc(ageLabel(r.oldest))}` : "Nothing waiting"}</span></a>
-      <a class="tile ${p.daysPlanned < 3 ? "warn" : ""}" href="#/publish"><span class="lbl">Planned ahead</span><span class="num">${plural(p.daysPlanned, "day", "days")}</span><span class="sub">${p.plannedUntil ? `Posts until ${esc(fmtDate(p.plannedUntil))}` : "Nothing scheduled"} · ${p.ready} ready</span></a>
+      <a class="tile ${p.daysPlanned < 3 ? "warn" : ""}" href="#/publish"><span class="lbl">Days planned ahead</span><span class="num">${p.daysPlanned}</span><span class="sub">${p.plannedUntil ? `Posts until ${esc(fmtDate(p.plannedUntil))}` : "Nothing scheduled"} · ${p.ready} ready</span></a>
       <a class="tile" href="#/insights"><span class="lbl">Typical video last week</span><span class="num">${w ? nf(w.typical) : "–"}</span><span class="sub">${w ? `Instagram views · ${plural(w.posts, "post", "posts")}` : "Connect Publer to see views"}</span></a>
       <div class="tile"><span class="lbl">Next payday</span><span class="num date">${esc(dayLabel(pay.nextPayday))}</span><span class="sub">${pay.owedVideos ? `${money(pay.owed)} for ${plural(pay.owedVideos, "approved video", "approved videos")}` : "Nothing owed right now"}</span></div>
     </div>
@@ -1727,9 +1727,10 @@ function renderInsights() {
   const lastW = wk[wk.length - 2], prevW = wk[wk.length - 3];
   const change = lastW?.typical && prevW?.typical ? Math.round((lastW.typical / prevW.typical - 1) * 100) : null;
   const first = wk.findIndex((w) => w.posts > 0);
+  const firstDay = d.days.findIndex((x) => x.posts > 0);
   const points = state.range === "days"
-    ? d.days.map((x) => { const dd = parseDay(x.date); return { label: `${dd.getDate()} ${MON[dd.getMonth()]}`, long: fmtDate(x.date), value: x.typical, posts: x.posts, current: x.current }; })
-    : wk.map((x) => { const dd = parseDay(x.start); return { label: `${dd.getDate()} ${MON[dd.getMonth()]}`, long: `Week of ${dd.getDate()} ${MON[dd.getMonth()]}`, value: x.typical, posts: x.posts, current: x.current }; });
+    ? d.days.slice(Math.max(0, Math.min(firstDay, d.days.length - 7))).map((x) => { const dd = parseDay(x.date); return { label: `${dd.getDate()} ${MON[dd.getMonth()]}`, long: fmtDate(x.date), value: x.typical, posts: x.posts, current: x.current }; })
+    : wk.slice(Math.max(0, Math.min(first, wk.length - 4))).map((x) => { const dd = parseDay(x.start); return { label: `${dd.getDate()} ${MON[dd.getMonth()]}`, long: `Week of ${dd.getDate()} ${MON[dd.getMonth()]}`, value: x.typical, posts: x.posts, current: x.current }; });
   const top = d.top.map((p) => {
     const t = thumbUrl(p.video?.videoUrl || "");
     const meta = [fmtDate(p.date), p.video?.editor, p.video?.template?.name].filter(Boolean).join(" · ");
@@ -1750,11 +1751,11 @@ function renderInsights() {
       <div class="tile"><span class="lbl">Typical video last week</span><span class="num">${nf(k.typicalLastWeek)}</span><span class="sub">${change != null ? `${change >= 0 ? "+" : ""}${change}% on the week before` : unit}</span></div>
       <div class="tile"><span class="lbl">Typical video, 4 weeks</span><span class="num">${nf(k.typical4w)}</span><span class="sub">${plural(k.posts4w, "video", "videos")} · ${nf(k.views4w)} ${unit} in total</span></div>
       <div class="tile"><span class="lbl">Shares per 1,000 ${unit}</span><span class="num">${k.shares1k ?? "–"}</span><span class="sub">Last 4 weeks · likes per 1,000: ${k.likes1k ?? "–"}</span></div>
-      <div class="tile"><span class="lbl">This week so far</span><span class="num">${nf(k.typicalThisWeek)}</span><span class="sub">Typical video, still collecting views</span></div>
+      <div class="tile"><span class="lbl">This week so far</span><span class="num">${nf(k.typicalThisWeek)}</span><span class="sub">${k.typicalThisWeek == null ? "No videos yet this week" : "Typical video, still collecting views"}</span></div>
     </div>
     <section class="card" aria-label="Typical video over time">
       <div class="card-head"><h2>Typical video per ${state.range === "days" ? "day" : "week"}</h2>
-        <div class="seg" role="group" aria-label="Range"><button class="${state.range === "weeks" ? "on" : ""}" data-act="insRange" data-v="weeks" aria-pressed="${state.range === "weeks"}">12 weeks</button><button class="${state.range === "days" ? "on" : ""}" data-act="insRange" data-v="days" aria-pressed="${state.range === "days"}">28 days</button></div>
+        <div class="seg" role="group" aria-label="Range"><button class="${state.range === "weeks" ? "on" : ""}" data-act="insRange" data-v="weeks" aria-pressed="${state.range === "weeks"}">Weeks</button><button class="${state.range === "days" ? "on" : ""}" data-act="insRange" data-v="days" aria-pressed="${state.range === "days"}">Days</button></div>
       </div>
       ${barChart(points, unit)}
       ${first > 0 ? `<p class="small muted" style="margin:10px 0 0">Publer has numbers from the week of ${esc(dayLabel(wk[first].start))} on, when posting through Publer started.</p>` : ""}
