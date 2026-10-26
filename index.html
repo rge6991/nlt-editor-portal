@@ -318,6 +318,17 @@
   .xlabels { display: flex; gap: 6px; margin-top: 8px; }
   .xlabels span { flex: 1 1 0; min-width: 0; text-align: center; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: visible; }
   .readout { margin-top: 14px; min-height: 22px; }
+  .cbars { position: relative; display: flex; gap: 6px; height: 170px; margin-top: 22px; }
+  .cbars .zero { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.28); }
+  .cbar { position: relative; flex: 1 1 0; min-width: 0; height: 100%; border-radius: 4px; }
+  .cbar:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+  .cbar .b { position: absolute; left: 50%; transform: translateX(-50%); width: 100%; max-width: 44px; background: rgba(99,217,154,0.78); border-radius: 4px 4px 0 0; }
+  .cbar .b.neg { background: rgba(255,159,128,0.85); border-radius: 0 0 4px 4px; }
+  .cbar.cur .b { opacity: 0.45; }
+  .cbar:hover .b, .cbar:focus .b { filter: brightness(1.15); }
+  .cbar .v { position: absolute; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .gain { color: var(--green); font-weight: 700; }
+  .loss { color: var(--salmon); font-weight: 700; }
   .tt { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
   .tt th { text-align: left; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 400; padding: 0 12px 10px 0; white-space: nowrap; }
   .tt td { padding: 12px 12px 12px 0; border-top: 1px solid rgba(255,255,255,0.1); vertical-align: top; }
@@ -365,6 +376,7 @@
     .lg { display: none; }
     .who { font-size: 0; gap: 0; }
     .bars { gap: 3px; height: 180px; }
+    .cbars { gap: 3px; }
     .seg { flex-wrap: wrap; }
     .seg button { padding: 8px 12px; }
     .xlabels { gap: 3px; }
@@ -413,7 +425,7 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 const state = { data: null, period: "week", filter: "all", shown: PAGE, upload: null, reupload: null, queue: null, rtab: "todo", drafts: {},
-  view: "", team: null, channel: "instagram", range: "weeks", plan: null, planRunning: false, sched: null };
+  view: "", team: null, channel: "all", range: "weeks", plan: null, planRunning: false, sched: null };
 
 /* ---------- small helpers ---------- */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1316,7 +1328,9 @@ function addNote() {
 const TEAM_ROUTES = ["#/team", "#/publish", "#/insights", "#/team-templates"];
 const isTeamRoute = (h) => h.startsWith("#/review") || TEAM_ROUTES.some((r) => h === r || h.startsWith(r + "/"));
 const ALL_CHANNELS = ["Instagram", "Facebook", "TikTok", "YouTube"];
-const NETS = [["instagram", "Instagram"], ["facebook", "Facebook"], ["tiktok", "TikTok"], ["youtube", "YouTube"]];
+const NETS = [["all", "All"], ["instagram", "Instagram"], ["facebook", "Facebook"], ["tiktok", "TikTok"], ["youtube", "YouTube"]];
+const netName = (k) => NETS.find((n) => n[0] === k)?.[1] || k;
+const signed = (n) => (n === null || n === undefined ? "–" : `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(Math.round(n)).toLocaleString("en-US")}`);
 const TRIALS = [["", "Normal reel"], ["Auto-share if it performs", "Trial reel, shared with followers if it does well"], ["Manual (share in Instagram)", "Trial reel, we share it by hand in Instagram"]];
 const LEVEL_INFO = [["Simple", "One shot, one angle."], ["Medium", "Two or three angles."], ["Advanced", "Four or more angles, or a story."]];
 const nf = (n) => (n === null || n === undefined || n === "" || !Number.isFinite(Number(n)) ? "–" : Math.round(Number(n)).toLocaleString("en-US"));
@@ -1706,6 +1720,56 @@ function barChart(points, unit) {
     <div class="readout small muted" id="readout" role="status">${points[lastFull] ? esc(`${points[lastFull].long}: typical video ${nf(points[lastFull].value)} ${unit}. Orange is the best, striped is still collecting views. Hover or tap a bar for its numbers.`) : "No videos with numbers yet."}</div>`;
 }
 
+function changeChart(points) {
+  const vals = points.map((p) => Number(p.value) || 0);
+  const maxPos = Math.max(0, ...vals), maxNeg = Math.max(0, ...vals.map((v) => -v));
+  const span = Math.max(1, maxPos + maxNeg);
+  const zero = maxNeg ? (maxPos / span) * 100 : 100;
+  let best = -1;
+  points.forEach((p, i) => { if (!p.current && p.value != null && p.value > 0 && (best < 0 || vals[i] > vals[best])) best = i; });
+  const bars = points.map((p, i) => {
+    const v = vals[i], h = Math.max(v ? 2 : 0, (Math.abs(v) / span) * 100);
+    const tip = p.value == null ? `${p.long}: no follower numbers` : `${p.long}: ${signed(p.value)} followers${p.current ? " so far" : ""}`;
+    const bar = !v ? "" : v > 0 ? `<div class="b" style="bottom:${100 - zero}%;height:${h}%"></div>` : `<div class="b neg" style="top:${zero}%;height:${h}%"></div>`;
+    return `<div class="cbar ${p.current ? "cur" : ""}" tabindex="0" role="img" aria-label="${esc(tip)}" data-tip="${esc(tip)}" data-out="readout2">${bar}${i === best ? `<span class="v" style="bottom:calc(${100 - zero + h}% + 4px)">${esc(signed(v))}</span>` : ""}</div>`;
+  }).join("");
+  const every = points.length > 14 ? 7 : window.innerWidth < 640 ? 3 : 1;
+  const labels = points.map((p, i) => `<span>${(points.length - 1 - i) % every === 0 ? esc(p.label) : ""}</span>`).join("");
+  return `<div class="cbars">${maxNeg ? `<div class="zero" style="top:${zero}%"></div>` : ""}${bars}</div>
+    <div class="xlabels" aria-hidden="true" style="border-top:1px solid rgba(255,255,255,0.2);padding-top:8px">${labels}</div>
+    <div class="readout small muted" id="readout2" role="status">Green is new followers, red is followers lost. Hover or tap a bar for its number.</div>`;
+}
+
+function followersCard(f, ch) {
+  if (!f) return `<section class="card" aria-label="Followers"><div class="card-head"><h2>Followers</h2></div><p class="muted" style="margin:0">Follower numbers come with the next refresh from Publer.</p></section>`;
+  const startDay = (list) => { const i = list.findIndex((x) => x.change !== null); return list.slice(Math.max(0, Math.min(i < 0 ? 0 : i, list.length - 4))); };
+  const points = state.range === "days"
+    ? startDay(f.days).map((x) => { const d = parseDay(x.date); return { label: `${d.getDate()} ${MON[d.getMonth()]}`, long: fmtDate(x.date), value: x.change, current: x.current }; })
+    : startDay(f.weeks).map((x) => { const d = parseDay(x.start); return { label: `${d.getDate()} ${MON[d.getMonth()]}`, long: `Week of ${d.getDate()} ${MON[d.getMonth()]}`, value: x.change, current: x.current }; });
+  const cls = (n) => (n > 0 ? "gain" : n < 0 ? "loss" : "");
+  const rows = f.top.map((p) => {
+    const t = thumbUrl(p.video?.videoUrl || "");
+    const meta = [fmtDate(p.date), ch === "all" ? (p.networks || []).map(netName).join(", ") : "", p.video?.editor, p.video?.template?.name].filter(Boolean).join(" · ");
+    return `<div class="vrow">
+      ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
+      <div class="vinfo"><div class="vt">${esc(p.caption || p.video?.title || "(no caption)")}</div><div class="small muted">${esc(meta)}${p.link ? ` · <a href="${esc(p.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>
+      <div style="text-align:right;min-width:140px"><div class="head ${cls(p.followers)}" style="font-size:22px;line-height:1.1">${esc(signed(p.followers))}</div><div class="small muted">followers in 2 days · ${nf(p.value)} views${p.shared ? ` · shared with ${plural(p.shared, "other post", "other posts")}` : ""}</div></div>
+    </div>`;
+  }).join("");
+  return `<section class="card" aria-label="Followers">
+    <div class="card-head"><h2>Followers</h2><span class="small muted">${ch === "all" ? "All channels together" : netName(ch)}</span></div>
+    <div class="tiles">
+      <div class="tile" style="background:var(--field)"><span class="lbl">Followers now</span><span class="num">${nf(f.now)}</span></div>
+      <div class="tile" style="background:var(--field)"><span class="lbl">Last 7 days</span><span class="num ${cls(f.change7)}">${esc(signed(f.change7))}</span></div>
+      <div class="tile" style="background:var(--field)"><span class="lbl">Last 4 weeks</span><span class="num ${cls(f.change28)}">${esc(signed(f.change28))}</span></div>
+    </div>
+    ${changeChart(points)}
+    <h3 style="margin:26px 0 4px;font-size:15px">Posts with the most new followers</h3>
+    ${rows || `<div class="empty">No posts with follower numbers yet.</div>`}
+    <p class="small muted" style="margin:14px 0 0">The platforms don't say which post brought a follower. This counts new followers on the day a post went out and the day after; posts in the same two days share them. Daily follower numbers from ${esc(dayLabel(f.firstDay))} on.</p>
+  </section>`;
+}
+
 function renderInsights() {
   const ch = state.channel;
   const d = teamData("ins:" + ch);
@@ -1733,7 +1797,7 @@ function renderInsights() {
     : wk.slice(Math.max(0, Math.min(first, wk.length - 4))).map((x) => { const dd = parseDay(x.start); return { label: `${dd.getDate()} ${MON[dd.getMonth()]}`, long: `Week of ${dd.getDate()} ${MON[dd.getMonth()]}`, value: x.typical, posts: x.posts, current: x.current }; });
   const top = d.top.map((p) => {
     const t = thumbUrl(p.video?.videoUrl || "");
-    const meta = [fmtDate(p.date), p.video?.editor, p.video?.template?.name].filter(Boolean).join(" · ");
+    const meta = [fmtDate(p.date), ch === "all" ? (p.networks || []).map(netName).join(", ") : "", p.video?.editor, p.video?.template?.name].filter(Boolean).join(" · ");
     return `<div class="vrow">
       ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
       <div class="vinfo"><div class="vt">${esc(p.caption || p.video?.title || "(no caption)")}</div><div class="small muted">${esc(meta)}${p.link ? ` · <a href="${esc(p.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>
@@ -1747,6 +1811,7 @@ function renderInsights() {
   app.innerHTML = shell("insights", `
     ${hero(`${seg}<button class="btn ghost" data-act="insRefresh">Refresh</button>`)}
     ${ch === "tiktok" ? `<p class="small muted" style="margin:-8px 0 0">Publer gives TikTok reach, not views, so compare TikTok only with TikTok.</p>` : ""}
+    ${ch === "all" ? `<p class="small muted" style="margin:-8px 0 0">All channels: a video posted to several channels counts once, with its views on Instagram, Facebook and YouTube plus its TikTok reach.</p>` : ""}
     <div class="tiles">
       <div class="tile"><span class="lbl">Typical video last week</span><span class="num">${nf(k.typicalLastWeek)}</span><span class="sub">${change != null ? `${change >= 0 ? "+" : ""}${change}% on the week before` : unit}</span></div>
       <div class="tile"><span class="lbl">Typical video, 4 weeks</span><span class="num">${nf(k.typical4w)}</span><span class="sub">${plural(k.posts4w, "video", "videos")} · ${nf(k.views4w)} ${unit} in total</span></div>
@@ -1760,6 +1825,7 @@ function renderInsights() {
       ${barChart(points, unit)}
       ${first > 0 ? `<p class="small muted" style="margin:10px 0 0">Publer has numbers from the week of ${esc(dayLabel(wk[first].start))} on, when posting through Publer started.</p>` : ""}
     </section>
+    ${followersCard(d.followers, ch)}
       <section class="card" aria-label="Best videos">
         <div class="card-head" style="margin-bottom:6px"><h2>Best videos, last 30 days</h2></div>
         ${top || `<div class="empty">No videos with numbers yet.</div>`}
@@ -1949,7 +2015,7 @@ function syncSlots() {
 }
 
 // Insights chart: the numbers of the bar under the pointer or keyboard focus.
-const showTip = (e) => { const b = e.target.closest?.("[data-tip]"); const out = document.getElementById("readout"); if (b && out) out.textContent = b.dataset.tip; };
+const showTip = (e) => { const b = e.target.closest?.("[data-tip]"); const out = b && document.getElementById(b.dataset.out || "readout"); if (out) out.textContent = b.dataset.tip; };
 app.addEventListener("mouseover", showTip);
 app.addEventListener("focusin", showTip);
 
@@ -2317,8 +2383,8 @@ function mockTeam(action, payload) {
     return { ok: true };
   }
   if (action === "insights") {
-    const ch = payload.channel || "instagram";
-    const scale = { instagram: 1, facebook: 0.35, tiktok: 0.6, youtube: 0.25 }[ch] || 1;
+    const ch = payload.channel || "all";
+    const scale = { all: 1.9, instagram: 1, facebook: 0.35, tiktok: 0.6, youtube: 0.25 }[ch] || 1;
     const today = parseDay(viennaNow().date), mon = weekStart(today);
     const base = [null, null, null, 2100, 2400, 2250, 2600, 2900, 2700, 3100, 3300, 1200];
     const weeks = base.map((b, i) => { const s = addDays(mon, -7 * (11 - i)); const cur = i === 11; const typ = b == null ? null : Math.round(b * scale); const posts = b == null ? 0 : cur ? 2 : 9 + (i % 3); return { start: iso(s), end: iso(addDays(s, 6)), posts, typical: typ, total: typ ? typ * posts * 2 : 0, current: cur }; });
@@ -2331,7 +2397,13 @@ function mockTeam(action, payload) {
       { id: "own", name: "Own idea", level: "", pay: null, posts: 21, typical: typ30, shares1k: 1.3 },
       { id: tm.T[1]?.id, name: tm.T[1]?.name, level: tm.T[1]?.level, pay: tm.T[1]?.pay, posts: 4, typical: Math.round(2900 * scale), shares1k: 1.0 },
     ].filter((t) => t.id).map((t) => ({ ...t, costPer1k: t.pay != null && t.typical ? Math.round((t.pay / t.typical) * 100000) / 100 : null }));
-    return copy({ connected: true, network: ch, metric: ch === "tiktok" ? "reach" : "views", refreshedAt: new Date(Date.now() - 40 * 60000).toISOString(),
+    top.forEach((t, i) => { t.networks = ch === "all" ? (i % 2 ? ["instagram", "facebook"] : ["instagram", "facebook", "tiktok", "youtube"]) : [ch]; });
+    const fscale = { all: 1, instagram: 0.4, facebook: 0.55, tiktok: 0.04, youtube: 0.03 }[ch] || 1;
+    const fdays = Array.from({ length: 28 }, (_, i) => { const d = iso(addDays(today, -(27 - i))); const base = i < 16 ? null : [12, 6, 20, 14, -4, 9, 1047, 24, 8, 11, -2, 30][i - 16]; return { date: d, change: base == null || i === 27 ? null : Math.round(base * fscale), current: i === 27 }; });
+    const fweeks = Array.from({ length: 12 }, (_, i) => { const st = addDays(mon, -7 * (11 - i)); return { start: iso(st), change: i < 9 ? null : Math.round([68, 1120, 41][i - 9] * fscale), current: i === 11 }; });
+    const followers = { now: Math.round(16804 * fscale), change7: Math.round(1070 * fscale), change28: Math.round(1229 * fscale), firstDay: iso(addDays(today, -11)), days: fdays, weeks: fweeks,
+      top: top.slice(0, 4).map((t, i) => ({ ...t, followers: Math.round([1071, 34, 22, -3][i] * fscale), shared: i === 0 ? 1 : 0 })) };
+    return copy({ connected: true, network: ch, metric: ch === "tiktok" ? "reach" : "views", refreshedAt: new Date(Date.now() - 40 * 60000).toISOString(), followers,
       kpis: { typicalThisWeek: weeks[11].typical, typicalLastWeek: weeks[10].typical, typical4w: typ30, posts4w: 38, views4w: Math.round(152000 * scale), shares1k: 1.4, likes1k: 41 }, weeks, days, top, byTemplate });
   }
   return null;
