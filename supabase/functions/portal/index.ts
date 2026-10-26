@@ -774,6 +774,7 @@ async function reviewQueue(req: Request) {
       id: r.id,
       title: String(f[V.title] ?? ""),
       editor: editorName || "Unknown editor",
+      editorId: ((f[V.editor] as string[] | undefined) ?? [])[0] ?? "",
       status: selectName(f[V.status]) || "Submitted",
       submitted: String(f[V.submitted] ?? ""),
       reviewed: String(f[V.reviewed] ?? ""),
@@ -926,7 +927,7 @@ async function logout(req: Request) {
 }
 
 // ---------- team area (reviewers only) ----------
-// Today, Publish, Templates and Insights. Every action here starts with requireReviewer, so editors never reach it.
+// Today, Publish, Insights, Templates and Editors. Every action here starts with requireReviewer, so editors never reach it.
 // Publishing reuses the Airtable automations: the portal fills the Publishing row and ticks Send to Publer,
 // the "Send to Publer" automation uploads it to Publer, "Check posted status" records it once it's live.
 // Insights read Publer's post numbers (PUBLER_API_KEY secret) into Postgres, refreshed every few hours.
@@ -1060,6 +1061,8 @@ async function publishData() {
       trial: selectName(f[PB.trial]),
       template: t ? { id: t.id, name: t.name, level: t.level, pay: t.pay } : null,
       editor: names.get(editorId) ?? "",
+      editorId,
+      videoId: sub?.id ?? "",
       submitted: sub ? String(sub.fields[V.submitted] ?? "") : "",
       postedAt: Number.isFinite(po) ? { iso: new Date(po).toISOString(), ...viennaParts(po) } : null,
       links: { instagram: webLink(f[PB.ig]), facebook: webLink(f[PB.fb]), tiktok: webLink(f[PB.tt]), youtube: webLink(f[PB.yt]) },
@@ -1094,7 +1097,7 @@ async function publishSchedule(req: Request, body: Record<string, unknown>) {
   await requireReviewer(s);
   const id = clip(body.id, 20);
   if (!REC_ID.test(id)) throw new HttpError(400, "Unknown video.");
-  const [rec] = await listAll(T_PUBLISHING, [PB.status, PB.send, PB.video], `RECORD_ID()="${id}"`);
+  const [rec] = await listAll(T_PUBLISHING, [PB.status, PB.send, PB.video, PB.athletes], `RECORD_ID()="${id}"`);
   if (!rec) throw new HttpError(404, "That video isn't in the Publishing table any more.");
   const status = selectName(rec.fields[PB.status]);
   if (status === "Scheduled" || status === "Already posted" || status === "Posted") {
@@ -1112,6 +1115,9 @@ async function publishSchedule(req: Request, body: Record<string, unknown>) {
   if (extras.some((h) => !HANDLE.test(h))) throw new HttpError(400, "Extra collaborators: Instagram handles only, separated by commas.");
   const ath = await athleteMap();
   const athleteIds = Array.isArray(body.athleteIds) ? (body.athleteIds as unknown[]).map(String).filter((a) => ath.has(a)).slice(0, 10) : null;
+  // Instagram doesn't allow collaborators on trial reels, so the post would fail in Publer.
+  const collaborators = (athleteIds ?? ((rec.fields[PB.athletes] as string[] | undefined) ?? [])).length + extras.length;
+  if (trial && collaborators) throw new HttpError(400, "Instagram doesn't allow collaborators on trial reels. Remove the collaborators or pick Normal reel.");
 
   let publishAt: string | null = null;
   if (body.draft !== true) {
@@ -1407,6 +1413,7 @@ async function postIndex() {
       title: String(r.fields[PB.title] ?? ""),
       videoUrl: webLink(r.fields[PB.video]),
       editor: names.get(((sub?.fields[V.editor] as string[] | undefined) ?? [])[0] ?? "") ?? "",
+      editorId: ((sub?.fields[V.editor] as string[] | undefined) ?? [])[0] ?? "",
       template: t ? { id: t.id, name: t.name, pay: t.pay, level: t.level } : null,
       athletes: ((r.fields[PB.athletes] as string[] | undefined) ?? []).map((id) => ath.get(id)?.name ?? "").filter(Boolean),
     };
@@ -1426,9 +1433,9 @@ async function postIndex() {
   return map;
 }
 
-type VideoInfo = { id: string; pay: number | null; title: string; videoUrl: string; editor: string; template: { id: string; name: string; pay: number | null; level: string } | null; athletes: string[] };
+type VideoInfo = { id: string; pay: number | null; title: string; videoUrl: string; editor: string; editorId: string; template: { id: string; name: string; pay: number | null; level: string } | null; athletes: string[] };
 // What the page gets about a video: no pay per video.
-const shownVideo = (v: VideoInfo | null) => (v ? { title: v.title, videoUrl: v.videoUrl, editor: v.editor, template: v.template, athletes: v.athletes } : null);
+const shownVideo = (v: VideoInfo | null) => (v ? { id: v.id, title: v.title, videoUrl: v.videoUrl, editor: v.editor, editorId: v.editorId, template: v.template, athletes: v.athletes } : null);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // Cost per 1,000 views from what editors were actually paid (each video once, even if it went out twice).
@@ -1876,6 +1883,210 @@ async function syncMailchimp() {
   await setState("mailchimp_synced", { since: startedAt, audience });
 }
 
+// ---- editors and videos (team only) ----
+// Who made what, how much of it was approved the first time, and how it did once posted. Never any bank or
+// payment-method field: Editors fields are listed one by one, and payouts leave out where the money went.
+
+// Publer's posts of our videos, per submission: views on every channel added up (TikTok: reach), plus each post.
+async function postedBySubmission() {
+  const [posts, index] = await Promise.all([loadPosts("all", LOOKBACK_DAYS), postIndex().catch(() => new Map<string, VideoInfo>())]);
+  const by = new Map<string, { views: number; posts: PostRow[] }>();
+  for (const p of posts) {
+    const info = videoOf(index, p);
+    if (!info?.id) continue;
+    const g = by.get(info.id) ?? { views: 0, posts: [] };
+    g.posts.push(p);
+    g.views += p.views ?? (p.network === "tiktok" ? p.reach ?? 0 : 0);
+    by.set(info.id, g);
+  }
+  return by;
+}
+
+// History lines are "date · who · what", newest first; "Changes requested" means the video went back.
+const changesAsked = (history: unknown) => (String(history ?? "").match(/ · Changes requested/g) ?? []).length;
+const versionsOf = (history: unknown) => 1 + (String(history ?? "").match(/New version submitted/g) ?? []).length;
+
+type Posted = Awaited<ReturnType<typeof postedBySubmission>>;
+function teamVideoRow(r: { id: string; fields: Record<string, unknown> }, tmap: Map<string, Template>, posted: Posted) {
+  const f = r.fields;
+  const link = String(f[V.link] ?? "");
+  const t = templateOf(f, tmap);
+  const p = posted.get(r.id);
+  return {
+    id: r.id,
+    title: String(f[V.title] ?? ""),
+    editorId: ((f[V.editor] as string[] | undefined) ?? [])[0] ?? "",
+    status: selectName(f[V.status]) || "Submitted",
+    submitted: String(f[V.submitted] ?? ""),
+    reviewed: String(f[V.reviewed] ?? ""),
+    videoUrl: /^https:\/\//.test(link) ? link : "",
+    template: t ? { id: t.id, name: t.name, level: t.level } : null,
+    pay: payoutNumber(f[V.payout]) || null,
+    paid: f[V.paid] === true,
+    changes: changesAsked(f[V.history]),
+    versions: versionsOf(f[V.history]),
+    posted: f[V.posted] === true || !!p,
+    views: p ? p.views : null,
+    networks: p ? [...new Set(p.posts.map((x) => x.network))] : [],
+  };
+}
+type TeamVideoRow = ReturnType<typeof teamVideoRow>;
+
+function editorStats(videos: TeamVideoRow[]) {
+  const approved = videos.filter((v) => v.status === "Approved");
+  const withViews = videos.filter((v) => v.views !== null);
+  const typical = median(withViews.map((v) => v.views!));
+  const pays = approved.map((v) => v.pay).filter((x): x is number => x !== null);
+  const avgPay = pays.length ? pays.reduce((a, b) => a + b, 0) / pays.length : null;
+  return {
+    submitted: videos.length,
+    approved: approved.length,
+    // Submitted or In Review rows that are already paid are old hourly work, not waiting for a review.
+    waiting: videos.filter((v) => (v.status === "Submitted" || v.status === "In Review") && !v.paid).length,
+    needsChanges: videos.filter((v) => v.status === "Needs Resubmission").length,
+    firstTime: approved.length ? Math.round((approved.filter((v) => v.changes === 0).length / approved.length) * 100) : null,
+    approvedFirstTime: approved.filter((v) => v.changes === 0).length,
+    posted: videos.filter((v) => v.posted).length,
+    measured: withViews.length,
+    typicalViews: typical,
+    avgPay: avgPay === null ? null : round2(avgPay),
+    costPer1k: avgPay && typical ? round2((avgPay / typical) * 1000) : null,
+    earned: round2(pays.reduce((a, b) => a + b, 0)),
+    owed: round2(approved.filter((v) => !v.paid).reduce((t, v) => t + (v.pay ?? 0), 0)),
+    lastSubmitted: videos.map((v) => v.submitted).filter(Boolean).sort().pop() ?? "",
+  };
+}
+
+const EDITOR_FIELDS = [E.name, E.email, E.status, E.rate, E.payModel, E.videos, E.payouts];
+const shapeEditor = (r: { id: string; fields: Record<string, unknown> }) => ({
+  id: r.id,
+  name: String(r.fields[E.name] ?? "").trim() || "Editor",
+  email: String(r.fields[E.email] ?? "").trim(),
+  status: selectName(r.fields[E.status]) || "",
+  payModel: selectName(r.fields[E.payModel]) || "Per Video",
+  rate: payoutNumber(r.fields[E.rate]) || null,
+});
+
+async function teamEditors(req: Request) {
+  const s = await sessionFrom(req);
+  await requireReviewer(s);
+  const [eds, vids, tlist, posted] = await Promise.all([
+    listAll(T_EDITORS, EDITOR_FIELDS),
+    listAll(T_VIDEOS, [V.title, V.editor, V.status, V.submitted, V.reviewed, V.payout, V.paid, V.template, V.history, V.link, V.posted], "", 5000),
+    getTemplates().catch(() => [] as Template[]),
+    postedBySubmission().catch((e) => { console.error("posted", e); return new Map() as Posted; }),
+  ]);
+  const tmap = new Map(tlist.map((t) => [t.id, t]));
+  const rows = vids.map((r) => teamVideoRow(r, tmap, posted));
+  const editors = eds.map((r) => {
+    const mine = rows.filter((v) => v.editorId === r.id);
+    const { email: _email, ...ed } = shapeEditor(r);
+    return { ...ed, ...editorStats(mine) };
+  }).filter((e) => e.submitted > 0 || e.status === "Active")
+    .sort((a, b) => Number(b.status === "Active") - Number(a.status === "Active") || b.lastSubmitted.localeCompare(a.lastSubmitted));
+  return { editors };
+}
+
+async function teamEditor(req: Request, body: Record<string, unknown>) {
+  const s = await sessionFrom(req);
+  await requireReviewer(s);
+  const id = clip(body.id, 20);
+  if (!REC_ID.test(id)) throw new HttpError(400, "Unknown editor.");
+  const [rec] = await listAll(T_EDITORS, EDITOR_FIELDS, `RECORD_ID()="${id}"`);
+  if (!rec) throw new HttpError(404, "That editor isn't in Airtable any more.");
+  const videoIds = (rec.fields[E.videos] as string[] | undefined) ?? [];
+  const payoutIds = (rec.fields[E.payouts] as string[] | undefined) ?? [];
+  const [vrecs, precs, tlist, posted] = await Promise.all([
+    getVideos(videoIds) as Promise<{ id: string; fields: Record<string, unknown> }[]>,
+    getPayouts(payoutIds).catch((e) => { console.error("payouts", e); return []; }),
+    getTemplates().catch(() => [] as Template[]),
+    postedBySubmission().catch((e) => { console.error("posted", e); return new Map() as Posted; }),
+  ]);
+  const tmap = new Map(tlist.map((t) => [t.id, t]));
+  const videos = vrecs.map((r) => teamVideoRow(r, tmap, posted)).sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
+  // The last notes the editor got back from review: what to coach on.
+  const notes = vrecs.flatMap((r) => String(r.fields[V.history] ?? "").split(/\n\s*\n/).map((e) => e.trim())
+    .filter((e) => / · Changes requested/.test(e.split("\n")[0] ?? ""))
+    .map((e) => {
+      const [head, ...rest] = e.split("\n");
+      const [date, who] = head.split(" · ");
+      return { videoId: r.id, title: String(r.fields[V.title] ?? ""), date: date ?? "", reviewer: who ?? "", text: rest.join("\n").slice(0, 600) };
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+  const payouts = precs.map(shapePayout).sort((a, b) => (b.payDate || "").localeCompare(a.payDate || ""))
+    .map(({ paidTo: _to, receipts: _r, rateSource: _rs, ...p }) => ({ ...p, videos: p.videoIds.length }));
+  return { editor: shapeEditor(rec), stats: editorStats(videos), videos, notes, payouts };
+}
+
+async function teamVideo(req: Request, body: Record<string, unknown>) {
+  const s = await sessionFrom(req);
+  await requireReviewer(s);
+  const id = clip(body.id, 20);
+  if (!REC_ID.test(id)) throw new HttpError(400, "Unknown video.");
+  const [[rec], tlist, names, pubRows, posted, ath] = await Promise.all([
+    getVideos([id]) as Promise<{ id: string; fields: Record<string, unknown> }[]>,
+    getTemplates().catch(() => [] as Template[]),
+    editorNames(),
+    listAll(T_PUBLISHING, Object.values(PB).filter((x) => x !== PB.posts && x !== PB.log)),
+    postedBySubmission().catch((e) => { console.error("posted", e); return new Map() as Posted; }),
+    athleteMap(),
+  ]);
+  if (!rec) throw new HttpError(404, "That video isn't in Airtable any more.");
+  const f = rec.fields;
+  const row = teamVideoRow(rec, new Map(tlist.map((t) => [t.id, t])), posted);
+  const t = templateOf(f, new Map(tlist.map((x) => [x.id, x])));
+  const pub = pubRows.find((r) => ((r.fields[PB.submission] as string[] | undefined) ?? []).includes(id));
+  let publishing = null;
+  if (pub) {
+    const pf = pub.fields;
+    const raw = selectName(pf[PB.status]);
+    const pa = pf[PB.publishAt] ? Date.parse(String(pf[PB.publishAt])) : NaN;
+    const po = pf[PB.postedAt] ? Date.parse(String(pf[PB.postedAt])) : NaN;
+    publishing = {
+      id: pub.id,
+      status: raw === "Already posted" ? "Posted" : raw,
+      publishAt: Number.isFinite(pa) ? viennaParts(pa) : null,
+      postedAt: Number.isFinite(po) ? viennaParts(po) : null,
+      channels: ((pf[PB.channels] as unknown[] | undefined) ?? []).map(selectName).filter((c) => CHANNELS.includes(c)),
+      caption: String(pf[PB.caption] ?? ""),
+      athletes: ((pf[PB.athletes] as string[] | undefined) ?? []).map((a) => ath.get(a)?.name ?? "").filter(Boolean),
+      trial: selectName(pf[PB.trial]),
+      links: { instagram: webLink(pf[PB.ig]), facebook: webLink(pf[PB.fb]), tiktok: webLink(pf[PB.tt]), youtube: webLink(pf[PB.yt]) },
+    };
+  }
+  const p = posted.get(id);
+  // Compared with our typical posted video (all channels added up, same as the editor profiles).
+  const typical = median([...posted.values()].map((x) => x.views));
+  const perNetwork = (p?.posts ?? []).slice().sort((a, b) => NETWORKS.indexOf(a.network) - NETWORKS.indexOf(b.network)).map((x) => ({
+    network: x.network,
+    date: viennaParts(Date.parse(x.published_at)).date,
+    views: x.views ?? (x.network === "tiktok" ? x.reach : null),
+    likes: x.likes, comments: x.comments, shares: x.shares, saves: x.saves,
+    link: x.link ? webLink(x.link) : "",
+  }));
+  const editorId = row.editorId;
+  return {
+    video: {
+      ...row,
+      reviewedBy: String(f[V.reviewedBy] ?? ""),
+      caption: String(f[V.caption] ?? ""),
+      music: webLink(f[V.music]),
+      feedback: String(f[V.notes] ?? ""),
+      history: String(f[V.history] ?? ""),
+      template: t ? { id: t.id, name: t.name, level: t.level, pay: t.pay } : null,
+    },
+    editor: editorId ? { id: editorId, name: names.get(editorId) ?? "" } : null,
+    publishing,
+    numbers: p ? {
+      views: p.views,
+      typical,
+      x: typical ? Math.round((p.views / typical) * 10) / 10 : null,
+      costPer1k: row.pay && p.views ? round2((row.pay / p.views) * 1000) : null,
+      perNetwork,
+    } : null,
+  };
+}
+
 // ---- templates admin ----
 
 async function teamTemplates(req: Request) {
@@ -1983,6 +2194,9 @@ Deno.serve(async (req) => {
       case "insights": return json(await insights(req, body), 200, origin);
       case "team-templates": return json(await teamTemplates(req), 200, origin);
       case "template-save": return json(await templateSave(req, body), 200, origin);
+      case "team-editors": return json(await teamEditors(req), 200, origin);
+      case "team-editor": return json(await teamEditor(req, body), 200, origin);
+      case "team-video": return json(await teamVideo(req, body), 200, origin);
       // Safe to call from anywhere: refreshes Publer's numbers at most every 3 hours and Mailchimp's statuses at
       // most every half hour, and returns nothing.
       case "refresh-stats":

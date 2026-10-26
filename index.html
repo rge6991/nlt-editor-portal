@@ -295,6 +295,17 @@
   .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .mini { display: inline-flex; align-items: center; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.08); color: #D5DEDB; }
   .mini.tpl { background: rgba(240,120,29,0.16); color: var(--orange-soft); }
+  a.mini { text-decoration: none; background: rgba(240,120,29,0.14); color: var(--orange-soft); }
+  a.mini:hover { text-decoration: underline; }
+  a.plink { color: var(--white); text-decoration: none; font-weight: 700; }
+  a.plink:hover { text-decoration: underline; text-decoration-color: rgba(255,255,255,0.4); }
+  a.elink { color: inherit; text-decoration: underline; text-decoration-color: rgba(255,255,255,0.3); text-underline-offset: 2px; }
+  a.elink:hover { color: var(--white); }
+  .vinfo a.vt { display: block; }
+  .prow { display: flex; flex-direction: column; gap: 3px; padding: 12px 0; border-top: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
+  .prow .tag-row { margin-top: 4px; }
+  .note-item { display: block; padding: 12px 0; border-top: 1px solid rgba(255,255,255,0.08); color: var(--white); text-decoration: none; }
+  .note-item:hover b { text-decoration: underline; }
   .flow-warn { color: var(--salmon); font-size: 13px; margin-top: 4px; }
   .flabel { font-size: 14px; font-weight: 700; }
   .days7 { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
@@ -579,6 +590,9 @@ async function render() {
     if (h === "#/insights") return renderInsights();
     if (h === "#/team-templates") return renderTeamTemplates();
     if (h.startsWith("#/team-templates/")) return renderTemplateEdit(h.slice(17));
+    if (h === "#/editors") return renderEditors();
+    if (h.startsWith("#/editors/")) return renderEditorProfile(h.slice(10));
+    if (h.startsWith("#/team-video/")) return renderTeamVideo(h.slice(13));
     if ((h === "#/" || h === "#") && state.view !== "editor") { go("#/team"); return; }
   }
   if (!isEditor()) { go("#/team"); return; }
@@ -595,7 +609,7 @@ const LOGO_SVG = document.getElementById("logo-tpl").innerHTML;
 const PHOTO = document.getElementById("photo-tpl").getAttribute("data-src");
 const ARROW = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>`;
 
-const TEAM_KEYS = ["team", "review", "publish", "insights", "ttpl"];
+const TEAM_KEYS = ["team", "review", "publish", "insights", "editors", "ttpl"];
 function shell(active, inner) {
   // The team (Reviewers list) gets the team menu; editors only ever see the editor menu.
   const teamNav = isReviewer() && (TEAM_KEYS.includes(active) || !isEditor() || (active === "" && state.view !== "editor"));
@@ -604,7 +618,7 @@ function shell(active, inner) {
   const link = (key, href, label, extra = "") => `<a href="${href}" class="${active === key ? "on" : ""}" ${active === key ? 'aria-current="page"' : ""}>${label}${extra}</a>`;
   const waiting = state.queue ? state.queue.filter((v) => v.status === "Submitted" || v.status === "In Review").length : teamData("overview")?.review?.count || 0;
   const nav = teamNav
-    ? link("team", "#/team", "Today") + link("review", "#/review", "Review", waiting ? ` <span class="count">${waiting}</span>` : "") + link("publish", "#/publish", "Publish") + link("insights", "#/insights", "Insights") + link("ttpl", "#/team-templates", "Templates") + (isEditor() ? `<a href="#/dashboard">Editor view</a>` : "")
+    ? link("team", "#/team", "Today") + link("review", "#/review", "Review", waiting ? ` <span class="count">${waiting}</span>` : "") + link("publish", "#/publish", "Publish") + link("insights", "#/insights", "Insights") + link("editors", "#/editors", "Editors") + link("ttpl", "#/team-templates", "Templates") + (isEditor() ? `<a href="#/dashboard">Editor view</a>` : "")
     : (isEditor() ? link("dash", isReviewer() ? "#/dashboard" : "#/", "Dashboard") + (templates().length ? link("tpl", "#/templates", "Templates") : "") + link("submit", "#/submit", 'Submit<span class="lg"> a video</span>') + link("pay", "#/payments", "Payments") : "") + (isReviewer() ? link("team", "#/team", "Team") : "");
   return `
   <header class="top"><div class="top-in">
@@ -1279,7 +1293,7 @@ function renderReview(id) {
     <div style="display:flex;flex-direction:column;gap:10px" class="vhead">
       <a class="back" href="#/review">${ARROW} Back to review</a>
       <div class="line"><h1 class="head">${esc(v.title || "(untitled)")}</h1>${statusBadge(v.status)}</div>
-      <div class="small muted">${esc(v.editor)} · submitted ${esc(dayLabel(v.submitted))} · version ${ver}</div>
+      <div class="small muted">${editorLink(v.editorId, v.editor)} · submitted ${esc(dayLabel(v.submitted))} · version ${ver}</div>
     </div>
     <div class="row">
       <div class="player">
@@ -1325,13 +1339,31 @@ function addNote() {
 /* ---------- team area (Reviewers list only) ---------- */
 // Today, Publish, Insights and Templates. Editors never get these links or pages, and every team action
 // in the backend checks the Reviewers list again.
-const TEAM_ROUTES = ["#/team", "#/publish", "#/insights", "#/team-templates"];
+const TEAM_ROUTES = ["#/team", "#/publish", "#/insights", "#/team-templates", "#/editors", "#/team-video"];
 const isTeamRoute = (h) => h.startsWith("#/review") || TEAM_ROUTES.some((r) => h === r || h.startsWith(r + "/"));
 const ALL_CHANNELS = ["Instagram", "Facebook", "TikTok", "YouTube"];
 const NETS = [["all", "All"], ["instagram", "Instagram"], ["facebook", "Facebook"], ["tiktok", "TikTok"], ["youtube", "YouTube"]];
 const netName = (k) => NETS.find((n) => n[0] === k)?.[1] || k;
 const signed = (n) => (n === null || n === undefined ? "–" : `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(Math.round(n)).toLocaleString("en-US")}`);
 const TRIALS = [["", "Normal reel"], ["Auto-share if it performs", "Trial reel, shared with followers if it does well"], ["Manual (share in Instagram)", "Trial reel, we share it by hand in Instagram"]];
+// Default: a trial reel that Instagram shares with followers if it does well. Instagram doesn't allow collaborators
+// on trial reels, so a video with athletes tagged as collaborators goes out as a normal reel and lands on their profiles too.
+const TRIAL_AUTO = "Auto-share if it performs";
+const hasCollab = (athletes, extra) => (athletes || []).length > 0 || !!String(extra || "").trim();
+const defaultTrial = (x) => x.trial || (hasCollab(x.athletes, x.extra) ? "" : TRIAL_AUTO);
+function trialHint(v, collab) {
+  if (v && collab) return `<span class="flow-warn">Instagram doesn't allow collaborators on trial reels. Remove the collaborators or pick Normal reel.</span>`;
+  if (v === TRIAL_AUTO) return "Goes to non-followers first. If it gets enough views in its first 72 hours, Instagram shows it to followers too and puts it on the grid.";
+  if (v) return "Goes to non-followers only, until someone shares it with followers in the Instagram app.";
+  return collab ? "Normal reel, so it also goes out on the collaborators' profiles. Trial reels can't have collaborators." : "Goes to followers and non-followers straight away.";
+}
+function syncTrial() {
+  const s = state.sched, sel = document.getElementById("pubTrial"), hint = document.getElementById("trialHint");
+  if (!s || !sel) return;
+  const collab = hasCollab(s.athletes, s.extra);
+  if (s.trial == null) sel.value = collab ? "" : TRIAL_AUTO;
+  if (hint) hint.innerHTML = trialHint(sel.value, collab);
+}
 const LEVEL_INFO = [["Simple", "One shot, one angle."], ["Medium", "Two or three angles."], ["Advanced", "Four or more angles, or a story."]];
 const nf = (n) => (n === null || n === undefined || n === "" || !Number.isFinite(Number(n)) ? "–" : Math.round(Number(n)).toLocaleString("en-US"));
 const kfmt = (n) => { const v = Number(n) || 0; return v >= 10000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(Math.round(v)); };
@@ -1349,6 +1381,12 @@ function miniTags(x) {
   const t = x?.template ? `<span class="mini tpl">${esc(x.template.name)}</span>` : "";
   return a || t ? `<div class="tag-row">${a}${t}</div>` : "";
 }
+// Links into the team pages: a video's details and an editor's profile.
+const videoLink = (id, inner, cls = "plink") => (id ? `<a class="${cls}" href="#/team-video/${esc(id)}">${inner}</a>` : inner);
+const editorLink = (id, name) => (!name ? "" : id ? `<a class="elink" href="#/editors/${esc(id)}">${esc(name)}</a>` : esc(name));
+const channelPills = (links) => Object.entries(links || {}).filter(([, u]) => u).map(([k, u]) => `<a class="mini" href="${esc(u)}" target="_blank" rel="noopener">${esc(netName(k))}</a>`).join("");
+const payLabel = (e) => (!e?.rate ? "–" : e.payModel === "Per Hour" ? `${money(e.rate)} an hour` : `${money(e.rate)} a video`);
+
 // The feed should keep changing: the same athlete or the same template twice in a row reads as a repeat.
 function flowIssue(a, b) {
   if (!a || !b) return "";
@@ -1377,6 +1415,9 @@ function loadTeamFor(h) {
   if (h.startsWith("#/publish")) return teamGet("pub", "publish-queue");
   if (h.startsWith("#/team-templates")) return teamGet("tpl", "team-templates");
   if (h === "#/insights") return teamGet("ins:" + state.channel, "insights", { channel: state.channel });
+  if (h === "#/editors") return teamGet("eds", "team-editors");
+  if (h.startsWith("#/editors/")) return teamGet("ed:" + h.slice(10), "team-editor", { id: h.slice(10) });
+  if (h.startsWith("#/team-video/")) return teamGet("vid:" + h.slice(13), "team-video", { id: h.slice(13) });
 }
 
 /* --- Today --- */
@@ -1518,19 +1559,25 @@ function renderPublish() {
     : x.status === "Draft in Publer" ? `<span class="badge b-sub">Draft in Publer</span>` : "";
   const readyRows = d.ready.map((x) => {
     const t = thumbUrl(x.videoUrl);
-    return `<a class="vrow" href="#/publish/${esc(x.id)}">
-      ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
-      <div class="vinfo"><div class="vt">${esc(x.title || "(untitled)")}</div><div class="small muted">${esc([x.editor, x.submitted ? `submitted ${dayLabel(x.submitted)}` : ""].filter(Boolean).join(" · "))}</div>${miniTags(x)}
+    const thumb = t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`;
+    return `<div class="vrow">
+      ${x.videoId ? `<a href="#/team-video/${esc(x.videoId)}" tabindex="-1" aria-hidden="true">${thumb}</a>` : thumb}
+      <div class="vinfo">${videoLink(x.videoId, esc(x.title || "(untitled)"), "vt plink")}<div class="small muted">${[editorLink(x.editorId, x.editor), x.submitted ? `submitted ${esc(dayLabel(x.submitted))}` : ""].filter(Boolean).join(" · ")}</div>${miniTags(x)}
         ${x.status === "Failed" && x.log ? `<div class="small" style="color:var(--salmon);margin-top:4px">${esc(clipText(x.log, 180))}</div>` : ""}
         ${!String(x.caption || "").trim() ? `<div class="small" style="color:var(--orange-soft);margin-top:4px">No caption yet</div>` : ""}
         <div class="badges m">${statusOf(x)}</div></div>
       <div class="badges d">${statusOf(x)}</div>
-      <span class="btn ghost lg">Schedule</span>
-    </a>`;
+      <a class="btn ghost" href="#/publish/${esc(x.id)}">Schedule</a>
+    </div>`;
   }).join("");
+  // One row per posted video: title to its details, then a link per channel it went out on.
   const recentRows = d.recent.map((x) => {
-    const links = Object.entries(x.links || {}).filter(([, u]) => u).map(([k, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(NETS.find((n) => n[0] === k)?.[1] || k)}</a>`).join(" · ");
-    return `<div class="li" style="flex-direction:column;align-items:flex-start;gap:2px"><span>${esc(x.title || "(untitled)")}</span><span class="small muted">${esc(fmtDate(x.postedAt.date))} · ${esc(x.postedAt.time)}${links ? ` · ${links}` : ""}</span></div>`;
+    const pills = channelPills(x.links);
+    return `<div class="prow">
+      ${videoLink(x.videoId, esc(x.title || "(untitled)"))}
+      <span class="small muted">${esc(fmtDate(x.postedAt.date))} · ${esc(x.postedAt.time)}${x.editor ? ` · ${editorLink(x.editorId, x.editor)}` : ""}</span>
+      ${pills ? `<div class="tag-row">${pills}</div>` : ""}
+    </div>`;
   }).join("");
   app.innerHTML = shell("publish", `
     <div class="hero">
@@ -1554,7 +1601,7 @@ function renderPublish() {
       <div class="side">
         <section class="card" aria-label="Posted recently">
           <div class="card-head" style="margin-bottom:6px"><h2>Posted recently</h2></div>
-          <div class="vlist">${recentRows || `<div class="empty">Nothing posted in the last week.</div>`}</div>
+          <div>${recentRows || `<div class="empty">Nothing posted in the last week.</div>`}</div>
         </section>
       </div>
     </div>`);
@@ -1571,7 +1618,7 @@ async function runPlan() {
     const p = plan[i], x = p.item;
     say(`Scheduling ${i + 1} of ${plan.length}: ${clipText(x.title, 40)}`);
     try {
-      await api("publish-schedule", { id: x.id, caption: x.caption, channels: x.channels.length ? x.channels : ALL_CHANNELS, date: p.date, time: p.time, extra: x.extra, trial: x.trial });
+      await api("publish-schedule", { id: x.id, caption: x.caption, channels: x.channels.length ? x.channels : ALL_CHANNELS, date: p.date, time: p.time, extra: x.extra, trial: defaultTrial(x) });
     } catch (err) { failed.push(`${clipText(x.title, 40)}: ${err.message}`); }
     // One at a time, so the Airtable automation and Publer keep up.
     if (i < plan.length - 1) await new Promise((r) => setTimeout(r, MOCK ? 300 : 15000));
@@ -1589,7 +1636,7 @@ function renderSchedule(id) {
   const back = `<a class="back" href="#/publish">${ARROW} Publish</a>`;
   if (!x) { app.innerHTML = shell("publish", `${back}<section class="card"><div class="empty">This video isn't waiting to be scheduled any more.</div></section>`); return; }
   const now = viennaNow();
-  if (!state.sched || state.sched.id !== id) state.sched = { id, channels: x.channels.length ? [...x.channels] : [...ALL_CHANNELS], athletes: (x.athletes || []).map((a) => a.id) };
+  if (!state.sched || state.sched.id !== id) state.sched = { id, channels: x.channels.length ? [...x.channels] : [...ALL_CHANNELS], athletes: (x.athletes || []).map((a) => a.id), extra: x.extra || "", trial: x.trial || null };
   const s = state.sched;
   const ath = new Map(d.athletes.map((a) => [a.id, a]));
   (x.athletes || []).forEach((a) => { if (!ath.has(a.id)) ath.set(a.id, a); });
@@ -1600,15 +1647,15 @@ function renderSchedule(id) {
     <div class="vhead" style="display:flex;flex-direction:column;gap:8px">
       <div class="eyebrow">Publish</div>
       <h1 class="head">${esc(x.title || "(untitled)")}</h1>
-      <div class="small muted">${esc([x.editor, x.submitted ? `submitted ${fmtFull(x.submitted)}` : "", x.template?.name].filter(Boolean).join(" · "))}</div>
+      <div class="small muted">${[editorLink(x.editorId, x.editor), x.submitted ? `submitted ${esc(fmtFull(x.submitted))}` : "", x.template ? esc(x.template.name) : "", x.videoId ? `<a class="elink" href="#/team-video/${esc(x.videoId)}">Video details</a>` : ""].filter(Boolean).join(" · ")}</div>
     </div>`;
   let body;
   if (x.status === "Scheduled" || x.status === "Posted" || x.sending) {
-    const links = Object.entries(x.links || {}).filter(([, u]) => u).map(([k, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(NETS.find((n) => n[0] === k)?.[1] || k)}</a>`).join(" · ");
+    const links = channelPills(x.links);
     body = `<div style="display:flex;flex-direction:column;gap:12px">
       <div class="kv">Status</div>
       <div>${x.sending ? "Being sent to Publer. Refresh in a minute." : x.status === "Scheduled" ? `Scheduled for <b>${esc(fmtDate(x.publishAt.date))} at ${esc(x.publishAt.time)}</b>. Change or cancel it in Publer.` : `Posted ${esc(fmtDate(x.postedAt?.date))} at ${esc(x.postedAt?.time || "")}.`}</div>
-      ${links ? `<div>${links}</div>` : ""}
+      ${links ? `<div class="tag-row">${links}</div>` : ""}
       <div class="kv" style="margin-top:8px">Caption</div><div class="pre">${esc(x.caption)}</div>
     </div>`;
   } else {
@@ -1642,7 +1689,8 @@ function renderSchedule(id) {
       </div>
       <div class="field">
         <label for="pubTrial">Instagram</label>
-        <select class="input" id="pubTrial">${TRIALS.map(([v, l]) => `<option value="${esc(v)}" ${x.trial === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <select class="input" id="pubTrial">${TRIALS.map(([v, l]) => `<option value="${esc(v)}" ${(s.trial ?? (hasCollab(s.athletes, s.extra) ? "" : TRIAL_AUTO)) === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <div class="hint" id="trialHint">${trialHint(s.trial ?? (hasCollab(s.athletes, s.extra) ? "" : TRIAL_AUTO), hasCollab(s.athletes, s.extra))}</div>
       </div>
       <div class="error hidden" id="schedError" role="alert"></div>
       <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
@@ -1695,6 +1743,7 @@ async function scheduleOne() {
   if (!draft && (!date || !time)) return fail("Pick a day and a time, or send it as a draft.");
   const extra = val("pubExtra").split(/[,\s]+/).filter(Boolean);
   if (extra.length > 3) return fail("Up to 3 other Instagram handles.");
+  if (val("pubTrial") && (s.athletes.length || extra.length)) return fail("Instagram doesn't allow collaborators on trial reels. Remove the collaborators or pick Normal reel.");
   btn.disabled = true; btn.textContent = "Sending…";
   try {
     await api("publish-schedule", { id: s.id, caption, channels: s.channels, athleteIds: s.athletes, extra: extra.join(", "), trial: val("pubTrial"), draft, date, time });
@@ -1762,10 +1811,10 @@ function followersCard(f, ch) {
   const cls = (n) => (n > 0 ? "gain" : n < 0 ? "loss" : "");
   const rows = f.top.map((p) => {
     const t = thumbUrl(p.video?.videoUrl || "");
-    const meta = [fmtDate(p.date), ch === "all" ? (p.networks || []).map(netName).join(", ") : "", p.video?.editor, p.video?.template?.name].filter(Boolean).join(" · ");
+    const meta = [esc(fmtDate(p.date)), ch === "all" ? esc((p.networks || []).map(netName).join(", ")) : "", editorLink(p.video?.editorId, p.video?.editor), p.video?.template ? esc(p.video.template.name) : ""].filter(Boolean).join(" · ");
     return `<div class="vrow">
       ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
-      <div class="vinfo"><div class="vt">${esc(p.caption || p.video?.title || "(no caption)")}</div><div class="small muted">${esc(meta)}${p.link ? ` · <a href="${esc(p.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>
+      <div class="vinfo">${p.video?.id ? videoLink(p.video.id, esc(p.caption || p.video?.title || "(no caption)"), "vt plink") : `<div class="vt">${esc(p.caption || p.video?.title || "(no caption)")}</div>`}<div class="small muted">${meta}${p.link ? ` · <a href="${esc(p.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>
       <div style="text-align:right;min-width:140px"><div class="head ${cls(p.followers)}" style="font-size:22px;line-height:1.1">${esc(signed(p.followers))}</div><div class="small muted">followers${dayList(p.followerDays)} · ${nf(p.value)} views</div></div>
     </div>`;
   }).join("");
@@ -1838,10 +1887,10 @@ function renderInsights() {
     : wk.slice(Math.max(0, Math.min(first, wk.length - 4))).map((x) => { const dd = parseDay(x.start); return { label: `${dd.getDate()} ${MON[dd.getMonth()]}`, long: `Week of ${dd.getDate()} ${MON[dd.getMonth()]}`, value: x.typical, posts: x.posts, current: x.current }; });
   const top = d.top.map((p) => {
     const t = thumbUrl(p.video?.videoUrl || "");
-    const meta = [fmtDate(p.date), ch === "all" ? (p.networks || []).map(netName).join(", ") : "", p.video?.editor, p.video?.template?.name].filter(Boolean).join(" · ");
+    const meta = [esc(fmtDate(p.date)), ch === "all" ? esc((p.networks || []).map(netName).join(", ")) : "", editorLink(p.video?.editorId, p.video?.editor), p.video?.template ? esc(p.video.template.name) : ""].filter(Boolean).join(" · ");
     return `<div class="vrow">
       ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
-      <div class="vinfo"><div class="vt">${esc(p.caption || p.video?.title || "(no caption)")}</div><div class="small muted">${esc(meta)}${p.link ? ` · <a href="${esc(p.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>
+      <div class="vinfo">${p.video?.id ? videoLink(p.video.id, esc(p.caption || p.video?.title || "(no caption)"), "vt plink") : `<div class="vt">${esc(p.caption || p.video?.title || "(no caption)")}</div>`}<div class="small muted">${meta}${p.link ? ` · <a href="${esc(p.link)}" target="_blank" rel="noopener">Open</a>` : ""}</div></div>
       <div style="text-align:right;min-width:120px"><div class="head" style="font-size:22px;line-height:1.1">${nf(p.value)}</div><div class="small muted">${p.x != null ? `${p.x}× typical` : ""}${p.shares1k != null ? ` · ${p.shares1k} shares per 1,000` : ""}</div></div>
     </div>`;
   }).join("");
@@ -1878,6 +1927,157 @@ function renderInsights() {
           <p class="small muted" style="margin:12px 0 0">Pay is what editors were paid for those videos. Cost per 1,000 ${unit} is pay for a video ÷ the typical video's ${unit}.${onlyOwn ? ` Once videos made with templates go live, this shows which template gets the most ${unit} per dollar.` : ""}</p>
         </section>
     <p class="small muted" style="margin:0">Numbers from Publer, updated ${esc(viennaStamp(d.refreshedAt))} (Vienna). They refresh every few hours.</p>`);
+}
+
+/* --- Editors: who makes what, and how it does --- */
+function renderEditors() {
+  const d = teamData("eds");
+  const list = d.editors;
+  const active = list.filter((e) => e.status === "Active");
+  const approved = list.reduce((t, e) => t + e.approved, 0), first = list.reduce((t, e) => t + (e.approvedFirstTime || 0), 0);
+  const waiting = list.reduce((t, e) => t + e.waiting, 0), owed = list.reduce((t, e) => t + (e.owed || 0), 0);
+  const rows = list.map((e) => `<tr>
+      <td><a href="#/editors/${esc(e.id)}">${esc(e.name)}</a>${e.status && e.status !== "Active" ? `<div class="small muted">${esc(e.status)}</div>` : ""}</td>
+      <td class="n">${esc(payLabel(e))}</td>
+      <td class="n">${e.submitted}</td>
+      <td class="n">${e.approved}</td>
+      <td class="n">${e.firstTime != null ? `${e.firstTime}%` : "–"}</td>
+      <td class="n">${e.waiting || "–"}</td>
+      <td class="n">${e.needsChanges || "–"}</td>
+      <td class="n">${nf(e.typicalViews)}</td>
+      <td class="n">${e.costPer1k != null ? usd2(e.costPer1k) : "–"}</td>
+      <td class="n">${e.lastSubmitted ? esc(dayLabel(e.lastSubmitted)) : "–"}</td>
+    </tr>`).join("");
+  app.innerHTML = shell("editors", `
+    <div class="hero">
+      <div>
+        <div class="eyebrow">Editors · team only</div>
+        <h1 class="head">Editors</h1>
+        <p>Who's making what, how much is approved the first time, and how their videos do once they're posted.</p>
+      </div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><span class="lbl">Active editors</span><span class="num">${active.length}</span><span class="sub">${plural(list.length, "editor", "editors")} with videos</span></div>
+      <div class="tile"><span class="lbl">Approved first time</span><span class="num">${approved ? `${Math.round((first / approved) * 100)}%` : "–"}</span><span class="sub">${first} of ${plural(approved, "approved video", "approved videos")}, no changes asked</span></div>
+      <a class="tile" href="#/review"><span class="lbl">Waiting for review</span><span class="num">${waiting}</span><span class="sub">across all editors</span></a>
+      <div class="tile"><span class="lbl">Owed now</span><span class="num">${money(Math.round(owed * 100) / 100)}</span><span class="sub">approved, not paid yet</span></div>
+    </div>
+    <section class="card" aria-label="All editors">
+      <div class="card-head" style="margin-bottom:10px"><h2>All editors</h2><span class="small muted">Views: all channels added up, per posted video</span></div>
+      <div class="scroll-x"><table class="tt" style="min-width:900px"><thead><tr><th>Editor</th><th class="n">Pay</th><th class="n">Videos</th><th class="n">Approved</th><th class="n">First time</th><th class="n">Waiting</th><th class="n">Changes</th><th class="n">Typical views</th><th class="n">Cost /1k</th><th class="n">Last video</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="10" class="muted">No editors yet.</td></tr>`}</tbody></table></div>
+      <p class="small muted" style="margin:12px 0 0">First time: approved without any changes asked. Typical views: the middle posted video, so one viral post doesn't move it. Cost /1k: pay for a video ÷ typical views × 1,000.</p>
+    </section>`);
+}
+
+function renderEditorProfile(id) {
+  const d = teamData("ed:" + id);
+  const e = d.editor, st = d.stats;
+  const vids = d.videos.map((v) => {
+    const t = thumbUrl(v.videoUrl);
+    const meta = [v.submitted ? `submitted ${esc(dayLabel(v.submitted))}` : "", v.template ? esc(v.template.name) : "", v.versions > 1 ? `${v.versions} versions` : "", v.pay ? money(v.pay) : ""].filter(Boolean).join(" · ");
+    const right = v.views != null
+      ? `<div class="head" style="font-size:20px;line-height:1.1">${nf(v.views)}</div><div class="small muted">views · ${esc(v.networks.map(netName).join(", "))}</div>`
+      : v.posted ? `<div class="small muted">Posted</div>` : "";
+    return `<a class="vrow" href="#/team-video/${esc(v.id)}">
+      ${t ? `<img class="thumb" src="${esc(t)}" alt="" loading="lazy">` : `<span class="thumb" aria-hidden="true"></span>`}
+      <div class="vinfo"><div class="vt">${esc(v.title || "(untitled)")}</div><div class="small muted">${meta}</div><div class="badges m">${statusBadge(v.status)}</div></div>
+      <div class="badges d">${statusBadge(v.status)}</div>
+      <div style="text-align:right;min-width:120px">${right}</div>
+    </a>`;
+  }).join("");
+  const notes = d.notes.map((n) => `<a class="note-item" href="#/team-video/${esc(n.videoId)}">
+      <div class="small"><b>${esc(clipText(n.title, 60))}</b></div>
+      <div class="small muted">${esc(dayLabel(n.date))}${n.reviewer ? ` · ${esc(n.reviewer)}` : ""}</div>
+      ${n.text ? `<div class="pre small" style="margin-top:6px;color:#E3EAE8">${esc(clipText(n.text, 260))}</div>` : ""}
+    </a>`).join("");
+  const pays = d.payouts.slice(0, 8).map((p) => `<div class="li"><span>${esc(dayLabel(p.payDate))} · ${plural(p.videos, "video", "videos")}</span><span>${money(p.usd)} · ${esc(p.status)}</span></div>`).join("");
+  app.innerHTML = shell("editors", `
+    <a class="back" href="#/editors">${ARROW} Editors</a>
+    <div class="hero">
+      <div>
+        <div class="eyebrow">Editor · team only</div>
+        <h1 class="head">${esc(e.name)}</h1>
+        <p>${[e.status ? esc(e.status) : "", esc(payLabel(e)), e.email ? `<a href="mailto:${esc(e.email)}">${esc(e.email)}</a>` : "", st.lastSubmitted ? `last video ${esc(dayLabel(st.lastSubmitted))}` : ""].filter(Boolean).join(" · ")}</p>
+      </div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><span class="lbl">Videos</span><span class="num">${st.submitted}</span><span class="sub">${st.approved} approved · ${st.waiting} waiting · ${st.needsChanges} with changes</span></div>
+      <div class="tile"><span class="lbl">Approved first time</span><span class="num">${st.firstTime != null ? `${st.firstTime}%` : "–"}</span><span class="sub">${st.approvedFirstTime} of ${st.approved} with no changes asked</span></div>
+      <div class="tile"><span class="lbl">Typical video</span><span class="num">${nf(st.typicalViews)}</span><span class="sub">views, all channels · ${plural(st.measured, "posted video", "posted videos")} with numbers</span></div>
+      <div class="tile"><span class="lbl">Cost per 1,000 views</span><span class="num">${st.costPer1k != null ? usd2(st.costPer1k) : "–"}</span><span class="sub">${st.avgPay ? `${money(st.avgPay)} a video ÷ typical ${nf(st.typicalViews)}` : "Shows once paid videos have numbers"}</span></div>
+    </div>
+    <div class="row">
+      <section class="card grow" aria-label="Videos">
+        <div class="card-head" style="margin-bottom:6px"><h2>Videos</h2><span class="small muted">Newest first</span></div>
+        ${vids || `<div class="empty">No videos yet.</div>`}
+      </section>
+      <div class="side">
+        <section class="card" aria-label="Notes from review">
+          <div class="card-head" style="margin-bottom:4px"><h2>Notes from review</h2></div>
+          ${notes || `<div class="empty" style="padding-top:4px">No changes asked so far.</div>`}
+        </section>
+        <section class="card" aria-label="Pay">
+          <div class="card-head" style="margin-bottom:8px"><h2>Pay</h2><span class="small muted">Owed now ${money(st.owed)}</span></div>
+          <div class="vlist">${pays || `<div class="empty" style="padding-top:4px">No payouts yet.</div>`}</div>
+          <p class="small muted" style="margin:12px 0 0">Earned so far: ${money(st.earned)} for ${plural(st.approved, "approved video", "approved videos")}.</p>
+        </section>
+      </div>
+    </div>`);
+}
+
+function renderTeamVideo(id) {
+  const d = teamData("vid:" + id);
+  const v = d.video, n = d.numbers, pb = d.publishing;
+  const back = d.editor ? `<a class="back" href="#/editors/${esc(d.editor.id)}">${ARROW} ${esc(d.editor.name)}</a>` : `<a class="back" href="#/publish">${ARROW} Publish</a>`;
+  const poster = thumbUrl(v.videoUrl, 540, 960);
+  const player = v.videoUrl ? `<video controls playsinline preload="metadata" src="${esc(v.videoUrl)}" ${poster ? `poster="${esc(poster)}"` : ""}></video>` : `<div class="ph">No video file</div>`;
+  const val = (x) => (x === null || x === undefined ? "–" : nf(x));
+  const numbers = n ? `
+      <div class="tiles">
+        <div class="tile" style="background:var(--field)"><span class="lbl">Views</span><span class="num">${nf(n.views)}</span><span class="sub">all channels added up</span></div>
+        <div class="tile" style="background:var(--field)"><span class="lbl">Vs typical</span><span class="num">${n.x != null ? `${n.x}×` : "–"}</span><span class="sub">our typical video: ${nf(n.typical)}</span></div>
+        <div class="tile" style="background:var(--field)"><span class="lbl">Cost per 1,000</span><span class="num">${n.costPer1k != null ? usd2(n.costPer1k) : "–"}</span><span class="sub">${v.pay ? `${money(v.pay)} ÷ ${nf(n.views)} views` : "no pay on this video"}</span></div>
+      </div>
+      <div class="scroll-x" style="margin-top:16px"><table class="tt"><thead><tr><th>Channel</th><th>Posted</th><th class="n">Views</th><th class="n">Likes</th><th class="n">Shares</th><th class="n">Saves</th><th class="n">Comments</th><th></th></tr></thead><tbody>
+        ${n.perNetwork.map((x) => `<tr><td>${esc(netName(x.network))}</td><td>${esc(dayLabel(x.date))}</td><td class="n">${val(x.views)}</td><td class="n">${val(x.likes)}</td><td class="n">${val(x.shares)}</td><td class="n">${val(x.saves)}</td><td class="n">${val(x.comments)}</td><td class="n">${x.link ? `<a href="${esc(x.link)}" target="_blank" rel="noopener">Open</a>` : ""}</td></tr>`).join("")}
+      </tbody></table></div>
+      ${n.perNetwork.some((x) => x.network === "tiktok") ? `<p class="small muted" style="margin:10px 0 0">TikTok: reach, as Publer gives no TikTok views.</p>` : ""}`
+    : `<p class="muted" style="margin:0">${pb?.status === "Posted" ? "Posted, but Publer has no numbers for it yet. They come with the next refresh." : "No numbers yet: it isn't posted."}</p>`;
+  const pubLine = !pb ? (v.status === "Approved" ? "Approved, not in the Publishing table yet." : "Not approved yet, so it isn't in Publish.")
+    : pb.status === "Posted" ? `Posted${pb.postedAt ? ` ${esc(fmtDate(pb.postedAt.date))} at ${esc(pb.postedAt.time)}` : ""}.`
+    : pb.status === "Scheduled" && pb.publishAt ? `Scheduled for <b>${esc(fmtDate(pb.publishAt.date))} at ${esc(pb.publishAt.time)}</b>.`
+    : `Ready to schedule. <a href="#/publish/${esc(pb.id)}">Schedule it</a>`;
+  const trialName = pb?.trial ? (TRIALS.find((t) => t[0] === pb.trial)?.[1] || pb.trial) : "";
+  app.innerHTML = shell(d.editor ? "editors" : "publish", `
+    <div style="display:flex;flex-direction:column;gap:10px" class="vhead">
+      ${back}
+      <div class="line"><h1 class="head">${esc(v.title || "(untitled)")}</h1>${statusBadge(v.status)}</div>
+      <div class="small muted">${[d.editor ? editorLink(d.editor.id, d.editor.name) : "", v.submitted ? `submitted ${esc(dayLabel(v.submitted))}` : "", v.template ? esc(v.template.name) : "", v.versions > 1 ? `${v.versions} versions` : "", v.reviewedBy ? `reviewed by ${esc(v.reviewedBy)}` : ""].filter(Boolean).join(" · ")}</div>
+    </div>
+    <div class="row">
+      <div class="player">${player}</div>
+      <div class="grow" style="display:flex;flex-direction:column;gap:20px;flex-basis:480px">
+        <section class="card" aria-label="How it did">
+          <div class="card-head" style="margin-bottom:14px"><h2 style="font-size:18px">How it did</h2></div>
+          ${numbers}
+        </section>
+        <section class="card" aria-label="Publishing" style="display:flex;flex-direction:column;gap:12px">
+          <h2 style="font-size:18px">Publishing</h2>
+          <div>${pubLine}</div>
+          ${pb && channelPills(pb.links) ? `<div class="tag-row">${channelPills(pb.links)}</div>` : ""}
+          ${pb ? `<div class="small muted">${[pb.channels.join(", "), trialName ? `Instagram: ${esc(trialName.toLowerCase())}` : "", pb.athletes.length ? `with ${esc(pb.athletes.join(", "))}` : ""].filter(Boolean).join(" · ")}</div>` : ""}
+          ${pb?.caption ? `<div><div class="kv">Caption posted</div><div class="pre">${esc(pb.caption)}</div></div>` : ""}
+        </section>
+        <section class="card" aria-label="What the editor sent" style="display:flex;flex-direction:column;gap:14px">
+          <h2 style="font-size:18px">What ${esc((d.editor?.name || "the editor").split(" ")[0])} sent</h2>
+          <div><div class="kv">Caption</div><div class="pre">${v.caption ? esc(v.caption) : `<span class="muted">No caption</span>`}</div></div>
+          <div><div class="kv">Music</div>${v.music ? `<a href="${esc(v.music)}" target="_blank" rel="noopener">${esc(v.music.replace(/^https?:\/\//, "").slice(0, 70))}</a>` : `<span class="muted">No music link</span>`}</div>
+          <div><div class="kv">Pay</div>${v.pay ? `${money(v.pay)} · ${v.paid ? "paid" : "not paid yet"}` : "–"}</div>
+        </section>
+        ${historyHtml(v)}
+      </div>
+    </div>`);
 }
 
 /* --- Templates (plan and price) --- */
@@ -2040,7 +2240,7 @@ app.addEventListener("keydown", (e) => {
 
 // Re-draws the schedule form (after adding or removing an athlete) without losing what was typed.
 function keepForm(redraw) {
-  const ids = ["pubCaption", "pubDate", "pubTime", "pubExtra", "pubTrial"];
+  const ids = ["pubCaption", "pubDate", "pubTime", "pubExtra"];
   const vals = Object.fromEntries(ids.map((i) => [i, document.getElementById(i)?.value]));
   const draft = !!document.getElementById("pubDraft")?.checked;
   const check = document.getElementById("pubCaptionCheck")?.innerHTML || "";
@@ -2050,6 +2250,7 @@ function keepForm(redraw) {
   const dr = document.getElementById("pubDraft");
   if (dr && draft) { dr.checked = true; dr.dispatchEvent(new Event("change", { bubbles: true })); }
   syncSlots();
+  syncTrial();
 }
 function syncSlots() {
   const dt = document.getElementById("pubDate"), tm = document.getElementById("pubTime");
@@ -2070,6 +2271,8 @@ app.addEventListener("change", (e) => {
     keepForm(() => renderSchedule(state.sched.id));
   }
   if (id === "pubDate" || id === "pubTime") syncSlots();
+  if (id === "pubTrial" && state.sched) { state.sched.trial = e.target.value; syncTrial(); }
+  if (id === "pubExtra" && state.sched) { state.sched.extra = e.target.value; syncTrial(); }
   if (id === "pubDraft") {
     const off = e.target.checked;
     ["pubDate", "pubTime"].forEach((x) => { document.getElementById(x).disabled = off; });
@@ -2321,7 +2524,7 @@ function mockApi(action, payload) {
     // The latest videos were made from templates.
     vids.slice(0, 4).forEach((v, i) => { const t = T[i % 2]; v.template = { id: t.id, name: t.name, pay: t.pay }; });
     const eds = ["Ralph Hepollo", "Mark Espejo", "Rian Magtaan"];
-    window.__mockQueue = vids.slice(0, 14).map((v, i) => ({ ...v, id: "recQueue" + String(i).padStart(9, "0"), editor: eds[i % 3], template: v.template ? T.find((t) => t.id === v.template.id) : null,
+    window.__mockQueue = vids.slice(0, 14).map((v, i) => ({ ...v, id: "recQueue" + String(i).padStart(9, "0"), editor: eds[i % 3], editorId: MOCK_EDS[i % 3].id, template: v.template ? T.find((t) => t.id === v.template.id) : null,
       status: i < 6 ? (i === 1 ? "In Review" : "Submitted") : i < 8 ? "Needs Resubmission" : "Approved",
       reviewed: i >= 6 ? iso(addDays(new Date(), -(i - 5))) : "", reviewedBy: i >= 6 ? "Carlo" : "",
       caption: i === 3 ? "" : "27 metres up, three seconds down, and a podium waiting at the bottom. Men's final at Area 47, Tyrol.",
@@ -2354,6 +2557,19 @@ function mockApi(action, payload) {
 }
 
 // Sample team data for ?mock: publishing queue, Today, templates and Insights (nothing is saved).
+const MOCK_EDS = [
+  { id: "recEditorSample01", name: "Ralph Hepollo", status: "Active", payModel: "Per Video", rate: 8 },
+  { id: "recEditorSample02", name: "Mark Espejo", status: "Active", payModel: "Per Video", rate: 8 },
+  { id: "recEditorSample03", name: "Rian Magtaan", status: "Inactive", payModel: "Per Hour", rate: 4 },
+];
+function mockEditorStats(i) {
+  return [
+    { submitted: 41, approved: 33, approvedFirstTime: 27, firstTime: 82, waiting: 3, needsChanges: 1, posted: 24, measured: 12, typicalViews: 4440, avgPay: 8, costPer1k: 1.8, earned: 264, owed: 16, lastSubmitted: iso(addDays(new Date(), -1)) },
+    { submitted: 12, approved: 8, approvedFirstTime: 5, firstTime: 63, waiting: 2, needsChanges: 1, posted: 5, measured: 3, typicalViews: 3120, avgPay: 8, costPer1k: 2.56, earned: 64, owed: 24, lastSubmitted: iso(addDays(new Date(), -3)) },
+    { submitted: 19, approved: 17, approvedFirstTime: 16, firstTime: 94, waiting: 0, needsChanges: 0, posted: 0, measured: 0, typicalViews: null, avgPay: 6.5, costPer1k: null, earned: 110.5, owed: 0, lastSubmitted: iso(addDays(new Date(), -40)) },
+  ][i];
+}
+
 function mockEmail(today) {
   const days = Array.from({ length: 28 }, (_, i) => ({ date: iso(addDays(today, -(27 - i))), change: i < 18 ? null : [3, 0, 2, 5, 1, 0, 4, 2, 1, 3][i - 18], current: i === 27 }));
   const mon = weekStart(today);
@@ -2371,7 +2587,7 @@ function mockTeam(action, payload) {
     const at = (n, t) => ({ iso: `${D(n)}T${t}:00`, date: D(n), time: t });
     const mk = (n, title, ath, extra = {}) => ({ id: "recPublish" + String(n).padStart(7, "0"), title, caption: "27 metres up, three seconds down. Who takes the title? 🏆", videoUrl: "https://res.cloudinary.com/os1vbtid/video/upload/v1/sample.mp4",
       channels: [...ALL_CHANNELS], publishAt: null, status: "", sending: false, log: "", athletes: ath.map((i) => A[i]), extra: "", trial: "", template: null,
-      editor: ["Ralph Hepollo", "Mark Espejo", "Rian Magtaan"][n % 3], submitted: D(-24 + n * 2), postedAt: null, links: {}, ...extra });
+      editor: MOCK_EDS[n % 3].name, editorId: MOCK_EDS[n % 3].id, videoId: "recVideo" + String(n).padStart(9, "0"), submitted: D(-24 + n * 2), postedAt: null, links: {}, ...extra });
     const ready = [
       mk(1, "Jonah Genser - Finals Day - Reel 02", [0]),
       mk(2, "Robin Steiner - First Comp Day - Reel 04", [1], { template: tref(0) }),
@@ -2434,6 +2650,37 @@ function mockTeam(action, payload) {
     else tm.T.push({ id: "recSampleTpl" + String(tm.T.length + 1).padStart(5, "0"), made: 0, open: fields.needed, full: false, ...fields });
     return { ok: true };
   }
+  if (action === "team-editors") return copy({ editors: MOCK_EDS.map((e, i) => ({ ...e, ...mockEditorStats(i) })) });
+  if (action === "team-editor") {
+    const i = Math.max(0, MOCK_EDS.findIndex((e) => e.id === payload.id));
+    const all = [...tm.pub.ready, ...tm.pub.scheduled, ...tm.pub.recent].filter((x) => x.editorId === MOCK_EDS[i].id);
+    const videos = all.map((x, k) => ({ id: x.videoId, title: x.title, editorId: x.editorId, status: "Approved", submitted: x.submitted, reviewed: x.submitted, videoUrl: x.videoUrl,
+      template: x.template, pay: MOCK_EDS[i].rate, paid: k > 1, changes: k === 1 ? 1 : 0, versions: k === 1 ? 2 : 1, posted: x.status === "Posted", views: x.status === "Posted" ? [12950, 4100, 3300][k % 3] : null, networks: x.status === "Posted" ? ["instagram", "facebook"] : [] }))
+      .concat([{ id: "recVideoQ00000001", title: "Batch 13 - Reel 4 - Platform Walkout", editorId: MOCK_EDS[i].id, status: "Submitted", submitted: iso(addDays(new Date(), -4)), reviewed: "", videoUrl: "", template: null, pay: null, paid: false, changes: 0, versions: 1, posted: false, views: null, networks: [] }])
+      .sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""));
+    return copy({ editor: { ...MOCK_EDS[i], email: MOCK_EDS[i].name.split(" ")[0].toLowerCase() + "@example.com" }, stats: mockEditorStats(i), videos,
+      notes: [{ videoId: videos[0]?.id, title: videos[0]?.title || "", date: iso(addDays(new Date(), -2)), reviewer: "Leo", text: "0:05 – Cut the walk to the edge.\n0:11 – Use the competition dive, not the training jump." },
+        { videoId: videos[1]?.id, title: videos[1]?.title || "", date: iso(addDays(new Date(), -9)), reviewer: "Carlo", text: "Text on screen is too small to read on a phone." }],
+      payouts: [{ id: "p1", payDate: iso(addDays(new Date(), -3)), status: "Paid", paidOn: iso(addDays(new Date(), -3)), usd: 64, rate: 56.1, php: 3590, note: "", videoIds: [], videos: 8 },
+        { id: "p2", payDate: iso(addDays(new Date(), -17)), status: "Paid", paidOn: iso(addDays(new Date(), -17)), usd: 80, rate: 56.4, php: 4512, note: "", videoIds: [], videos: 10 }] });
+  }
+  if (action === "team-video") {
+    const x = [...tm.pub.ready, ...tm.pub.scheduled, ...tm.pub.recent].find((v) => v.videoId === payload.id) || tm.pub.recent[0];
+    const ed = MOCK_EDS.find((e) => e.id === x.editorId) || MOCK_EDS[0];
+    const posted = x.status === "Posted";
+    return copy({
+      video: { id: payload.id, title: x.title, editorId: ed.id, status: "Approved", submitted: x.submitted, reviewed: x.submitted, videoUrl: x.videoUrl, template: x.template, pay: ed.rate, paid: posted, changes: 1, versions: 2, posted, views: posted ? 21400 : null, networks: posted ? ["instagram", "facebook", "tiktok", "youtube"] : [],
+        reviewedBy: "Carlo", caption: x.caption, music: "https://artlist.io/royalty-free-music/song/sample/12345", feedback: "",
+        history: `${x.submitted} · Carlo · Approved\n\n${x.submitted} · Editor · New version submitted\n\n${x.submitted} · Leo · Changes requested\n0:05 – Cut the walk to the edge.` },
+      editor: { id: ed.id, name: ed.name },
+      publishing: { id: x.id, status: x.status || "", publishAt: x.publishAt, postedAt: x.postedAt, channels: x.channels, caption: x.caption, athletes: athleteNames(x), trial: x.trial, links: x.links },
+      numbers: posted ? { views: 21400, typical: 4440, x: 4.8, costPer1k: 0.37, perNetwork: [
+        { network: "instagram", date: x.postedAt.date, views: 15200, likes: 690, comments: 14, shares: 31, saves: 22, link: "https://www.instagram.com/" },
+        { network: "facebook", date: x.postedAt.date, views: 4800, likes: 120, comments: 6, shares: 9, saves: null, link: "https://www.facebook.com/" },
+        { network: "youtube", date: x.postedAt.date, views: 900, likes: 18, comments: 1, shares: null, saves: null, link: "https://www.youtube.com/" },
+        { network: "tiktok", date: x.postedAt.date, views: 500, likes: 22, comments: 0, shares: 1, saves: 2, link: "" }] } : null,
+    });
+  }
   if (action === "insights") {
     const ch = payload.channel || "all";
     const scale = { all: 1.9, instagram: 1, facebook: 0.35, tiktok: 0.6, youtube: 0.25 }[ch] || 1;
@@ -2443,7 +2690,7 @@ function mockTeam(action, payload) {
     const days = Array.from({ length: 28 }, (_, i) => { const has = i % 4 !== 3; const typ = Math.round((2300 + ((i * 37) % 11) * 150) * scale); return { date: iso(addDays(today, -(27 - i))), posts: has ? 1 + (i % 2) : 0, typical: has ? (i >= 26 ? Math.round(typ * 0.45) : typ) : null, current: i >= 26 }; });
     const caps = ["Maybe the perfect shot does exist… 🍿", "Came for the jumps, stayed for the people. 🫶🏽", "Some things make sense only after you experience them.", "Every movement matters when the moment comes.", "27 metres. Three seconds. One shot.", "Podium day in Tyrol 🏆"];
     const typ30 = Math.round(3150 * scale);
-    const top = caps.map((c, i) => { const v = Math.round([66625, 21400, 12950, 8800, 6100, 4900][i] * scale); return { id: "p" + i, caption: c, date: iso(addDays(today, -3 - i * 4)), link: "https://www.instagram.com/", value: v, x: Math.round((v / typ30) * 10) / 10, shares1k: [1.8, 2.4, 1.1, 0.9, 1.6, 0.7][i], likes1k: 40 + i, video: i % 2 ? null : { title: "Batch " + (3 + i), videoUrl: "", editor: "Ralph Hepollo", template: i === 2 ? tm.T[0] && { id: tm.T[0].id, name: tm.T[0].name, pay: tm.T[0].pay, level: tm.T[0].level } : null, athletes: [] } }; });
+    const top = caps.map((c, i) => { const v = Math.round([66625, 21400, 12950, 8800, 6100, 4900][i] * scale); return { id: "p" + i, caption: c, date: iso(addDays(today, -3 - i * 4)), link: "https://www.instagram.com/", value: v, x: Math.round((v / typ30) * 10) / 10, shares1k: [1.8, 2.4, 1.1, 0.9, 1.6, 0.7][i], likes1k: 40 + i, video: i % 2 ? null : { id: "recVideo" + String(30 + i).padStart(9, "0"), title: "Batch " + (3 + i), videoUrl: "", editor: "Ralph Hepollo", editorId: MOCK_EDS[0].id, template: i === 2 ? tm.T[0] && { id: tm.T[0].id, name: tm.T[0].name, pay: tm.T[0].pay, level: tm.T[0].level } : null, athletes: [] } }; });
     const byTemplate = [
       { id: tm.T[0]?.id, name: tm.T[0]?.name, level: tm.T[0]?.level, pay: tm.T[0]?.pay, posts: 6, typical: Math.round(4200 * scale), shares1k: 2.1 },
       { id: "own", name: "Own idea", level: "", pay: 8, posts: 21, typical: typ30, shares1k: 1.3 },
