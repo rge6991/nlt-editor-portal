@@ -50,9 +50,18 @@ function channelOf(c: Contact): "instagram" | "facebook" {
 async function manychatContact(id: string): Promise<Contact> {
   const key = Deno.env.get("MANYCHAT_API_KEY");
   if (!key) throw new HttpError(503, "ManyChat isn't connected yet.");
-  const res = await fetch(`https://api.manychat.com/fb/subscriber/getInfo?subscriber_id=${encodeURIComponent(id)}`, {
-    headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-  });
+  // ManyChat answers 429 when it gets too many API calls at once (e.g. a bulk tag fires this for many contacts),
+  // so wait and ask again a few times before giving up.
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    res = await fetch(`https://api.manychat.com/fb/subscriber/getInfo?subscriber_id=${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+    });
+    if (res.status !== 429) break;
+    await res.body?.cancel();
+    await new Promise((r) => setTimeout(r, 400 * 2 ** attempt + Math.random() * 300));
+  }
+  if (!res || res.status === 429) throw new HttpError(503, "ManyChat is busy. Try again in a minute.");
   const body = await res.json().catch(() => ({})) as { status?: string; data?: Contact; message?: string };
   if (res.status === 401 || res.status === 403) {
     console.error("manychat refused", res.status, JSON.stringify(body).slice(0, 300));
@@ -126,7 +135,7 @@ Deno.serve(async (req) => {
     const id = clip(body.subscriber_id ?? body.contact_id ?? body.id, 30);
     if (!/^\d{3,25}$/.test(id)) return json({ error: "Send the ManyChat contact ID as subscriber_id." }, 400);
     if (!await allow(`manychat:${id}`, "1 hour", 10)) return json({ error: "Too many requests for this contact." }, 429);
-    if (!await allow("manychat:all", "1 minute", 300)) return json({ error: "Too many requests. Try again in a minute." }, 429);
+    if (!await allow("manychat:all", "1 minute", 1500)) return json({ error: "Too many requests. Try again in a minute." }, 429);
 
     const c = await manychatContact(id);
     const email = emailOf(c);
