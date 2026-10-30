@@ -444,10 +444,10 @@ function editorTemplate(t: Template) {
   return rest;
 }
 
-// "" or "own" means the editor's own idea. Anything else must be a template this person can see that isn't full.
-async function pickTemplate(raw: unknown, s: { reviewerId: string | null }): Promise<string | null> {
+// Every new video is a template video: a template this person can see that isn't full. Own ideas are closed.
+async function pickTemplate(raw: unknown, s: { reviewerId: string | null }): Promise<string> {
   const id = clip(raw, 20);
-  if (!id || id === "own") return null;
+  if (!id || id === "own") throw new HttpError(400, "Pick the template you used. We only take template videos now.");
   if (!/^rec[A-Za-z0-9]{14}$/.test(id)) throw new HttpError(400, "Pick a template from the list.");
   const t = (await getTemplates()).find((x) => x.id === id);
   const team = !!(t && t.active && !t.live && s.reviewerId && await activeReviewer(s.reviewerId));
@@ -706,8 +706,8 @@ async function submit(req: Request, body: Record<string, unknown>) {
     [V.music]: music,
     [V.status]: "Submitted",
     [V.submitted]: viennaToday(),
+    [V.template]: [templateId],
   };
-  if (templateId) fields[V.template] = [templateId];
   const data = await airtable(T_VIDEOS, { method: "POST", body: JSON.stringify({ records: [{ fields }], typecast: true }) });
   return { id: data.records?.[0]?.id };
 }
