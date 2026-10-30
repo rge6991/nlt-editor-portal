@@ -482,6 +482,8 @@ const payFor = (t) => (t && t.pay != null ? Number(t.pay) : ownRate());
 const levelBadge = (l) => (l ? `<span class="badge ${l === "Advanced" ? "b-adv" : l === "Medium" ? "b-med" : "b-simple"}">${esc(l)}</span>` : "");
 const amountCell = (v) => v.status === "Approved" || v.amount ? money(v.amount) : `<span class="pending" title="Paid once approved">${money(expected(v))}</span>`;
 const isReviewer = () => !!state.data?.reviewer;
+// Templates only: the team sees the portal without own ideas first; editors keep them until we switch everyone over.
+const ownIdeasOpen = () => !isReviewer();
 
 function toast(msg) {
   const t = document.createElement("div");
@@ -1072,25 +1074,27 @@ function renderTemplates() {
       </div>
     </div>
     ${list.length ? `<div class="tgrid">${list.map(templateCard).join("")}</div>`
-      : `<section class="card"><div class="empty" style="padding:4px 0">No templates are open right now. New ones show up here.</div></section>`}`);
+      : `<section class="card"><div class="empty" style="padding:4px 0">${ownIdeasOpen() ? `No templates right now. <a href="#/submit">Submit your own idea</a>.` : "No templates are open right now. New ones show up here."}</div></section>`}`);
 }
 
 function tplHint(id) {
   const t = templates().find((x) => x.id === id);
   if (t) return `Pays ${money(payFor(t))} once approved.${t.example ? ` <a href="${esc(t.example)}" target="_blank" rel="noopener">Watch the example</a> ·` : ""} <a href="#/templates">Read the brief</a>`;
+  if (id === "own") return `Your own idea pays your rate, ${money(ownRate())}, once approved.`;
   return `Not sure which one? <a href="#/templates">See the templates</a>.`;
 }
 
 function templatePicker(pre) {
   const list = templates();
   if (!list.length) return "";
-  const sel = list.some((t) => t.id === pre && !t.full) ? pre : "";
+  const sel = list.some((t) => t.id === pre && !t.full) || (pre === "own" && ownIdeasOpen()) ? pre : "";
   const opt = (t) => `<option value="${esc(t.id)}"${t.id === sel ? " selected" : ""}${t.full ? " disabled" : ""}>${esc(t.name)}${t.level ? ` · ${esc(t.level)}` : ""} · ${money(payFor(t))}${t.live === false ? " · team only" : ""}${t.full ? " · full" : ""}</option>`;
   return `<div class="field">
     <label for="tpl">Template <span class="req">Required</span></label>
     <select class="input" id="tpl" required>
       <option value=""${sel ? "" : " selected"} disabled>Choose the template you used</option>
       ${list.map(opt).join("")}
+      ${ownIdeasOpen() ? `<option value="own"${sel === "own" ? " selected" : ""}>Own idea · ${money(ownRate())}</option>` : ""}
     </select>
     <span class="hint" id="tplHint">${tplHint(sel)}</span>
   </div>`;
@@ -1124,7 +1128,7 @@ function progressBox(name) {
 
 function renderSubmit(pre = "") {
   state.upload = null;
-  if (!templates().some((t) => !t.full)) {
+  if (!ownIdeasOpen() && !templates().some((t) => !t.full)) {
     app.innerHTML = shell("submit", `
     <div style="display:flex;flex-direction:column;gap:10px">
       <a class="back" href="#/">${ARROW} Back to dashboard</a>
@@ -1137,7 +1141,7 @@ function renderSubmit(pre = "") {
     <div style="display:flex;flex-direction:column;gap:10px">
       <a class="back" href="#/">${ARROW} Back to dashboard</a>
       <h1 class="head" style="margin:0;font-size:40px;line-height:1.05">Submit a video</h1>
-      <p style="margin:0;font-size:16px;color:var(--soft)">Pick the template you used, upload your finished cut, then add the caption and the track you used.</p>
+      <p style="margin:0;font-size:16px;color:var(--soft)">${templates().length ? "Pick the template you used, upload" : "Upload"} your finished cut, then add the caption and the track you used.</p>
     </div>
     <section class="card" style="max-width:760px;display:flex;flex-direction:column;gap:22px" aria-label="Video details">
       ${templatePicker(pre)}
@@ -2426,8 +2430,8 @@ app.addEventListener("click", async (e) => {
     const caption = document.getElementById("caption").value.trim();
     const music = document.getElementById("music").value.trim();
     const tplEl = document.getElementById("tpl");
-    const templateId = tplEl ? tplEl.value : "";
-    if (!templateId) { if (tplEl) tplEl.focus(); return fail("Pick the template you used."); }
+    const templateId = tplEl ? tplEl.value : (ownIdeasOpen() ? "own" : "");
+    if (!templateId) { if (tplEl) tplEl.focus(); return fail(ownIdeasOpen() ? "Pick the template you used, or Own idea." : "Pick the template you used."); }
     if (!state.upload) return fail("Upload the video file first.");
     if (!title) { document.getElementById("title").focus(); return fail("Give the video a title."); }
     if (!caption) { document.getElementById("caption").focus(); return fail("Add the caption."); }
